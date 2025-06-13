@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: penai-morehouse-chatbot
+    env: python
+    buildCommand: ""
+    startCommand: gunicorn app:app
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: DEEPL_API_KEY
+        sync: false
+
