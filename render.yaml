@@ -2,7 +2,9 @@ services:
   - type: web
     name: penai-morehouse-chatbot
     env: python
-    buildCommand: ""
+    buildCommand: >
+      pip install --upgrade pip setuptools wheel &&
+      pip install -r requirements.txt
     startCommand: gunicorn app:app
     envVars:
       - key: OPENAI_API_KEY
@@ -11,4 +13,5 @@ services:
         sync: false
       - key: PYTHON_VERSION
         value: 3.12.6
+
 
