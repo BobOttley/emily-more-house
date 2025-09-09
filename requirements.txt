@@ -1,11 +1,11 @@
 Flask==2.3.3
 flask-cors==4.0.0
 python-dotenv==1.0.1
-openai==1.51.2
+openai>=1.31.0
 numpy==2.0.1
 requests==2.32.3
-psycopg[binary]==3.2.5
-psycopg_pool==3.2.5
-gunicorn==22.0.0
+psycopg[binary]==3.2.10
+psycopg_pool==3.2.6
+gunicorn==20.1.0
+python-dateutil==2.9.0.post0
 beautifulsoup4==4.12.3
-
