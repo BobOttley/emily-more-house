@@ -2,24 +2,20 @@
 """PEN.ai Flask backend – Enhanced conversational voice with memory and proactive engagement"""
 
 import os
+import pickle
+import numpy as np
+import difflib
 import re
 import json
-import uuid
-import pickle
-import hashlib
-import difflib
-from datetime import datetime, date
 from typing import Optional, Dict, Any, List
+from datetime import datetime
+import uuid
 
-import numpy as np
 import requests
-from bs4 import BeautifulSoup
-from dateutil import parser as dateparse
 from flask import Flask, request, jsonify, send_from_directory, session
 from flask_cors import CORS
 from dotenv import load_dotenv
 from openai import OpenAI
-
 
 # ── Boot ────────────────────────────────────────────────────────────
 print("✅ Flask server is starting")
@@ -358,42 +354,10 @@ from language_engine import translate
 
 response_enhancer = ResponseEnhancer()
 
-def get_open_day_events():
-    """Read open days cache and return sorted events"""
-    try:
-        with open(OPEN_DAYS_CACHE, "r", encoding="utf-8") as f:
-            payload = json.load(f)
-            return payload.get("events", [])
-    except Exception as e:
-        print("⚠️ Could not read open days cache:", e)
-        return []
-
-
 def find_best_answer(question, language='en', session_id=None, family_id=None):
     q_lower = question.strip().lower()
     print(f"🧠 Processing: {q_lower} | Lang: {language} | Session: {session_id}")
     
-        # Special case: Open Days / Visits
-    open_day_keywords = ["open day", "open morning", "open evening", "visit", "tour"]
-    if any(kw in q_lower for kw in open_day_keywords):
-        events = get_open_day_events()
-        if events:
-            next_event = sorted(events, key=lambda e: e["date_iso"])[0]
-            answer = (
-                f"Our next {next_event['event_name']} is on "
-                f"{next_event['date_human']}. "
-                f"You can find more details and register here: "
-                f"{next_event['booking_link']}"
-            )
-            return answer, next_event["booking_link"], "Open Days", "open_days", "open_days"
-        else:
-            answer = (
-                "We don’t currently have any upcoming Open Days listed. "
-                f"You can check back soon on our [Admissions page]({OPEN_DAYS_URL})."
-            )
-            return answer, OPEN_DAYS_URL, "Admissions", "open_days", "open_days"
-
-
     # Get or create conversation tracker
     if session_id:
         if session_id not in conversation_memory:
@@ -506,81 +470,7 @@ def find_best_answer(question, language='en', session_id=None, family_id=None):
         
     return no_match_response, None, None, None, "none"
 
-
-
-# ── Open Days Scraper + Cache ──────────────────────────────────────
-OPEN_DAYS_URL = "https://www.morehouse.org.uk/admissions/joining-more-house/"
-OPEN_DAYS_CACHE = "/tmp/open_days.json"  # or use S3 path
-REFRESH_SECRET = os.getenv("OPEN_DAYS_REFRESH_SECRET", "change-me")
-
-def _extract_events_from_html(html: str):
-    soup = BeautifulSoup(html, "html.parser")
-    text = " ".join(soup.get_text(" ").split())
-
-    pat = re.compile(
-        r"(Open (?:Morning|Evening|Day|Event|Sixth Form Open (?:Morning|Evening)))"
-        r"\s*[–-]\s*([A-Za-z]+ \d{1,2} [A-Za-z]+ \d{4})",
-        re.I
-    )
-
-    unique = {}  # key: (event_name, date_iso) -> event dict
-    for name, date_str in pat.findall(text):
-        dt = dateparse.parse(date_str, dayfirst=True)
-        if dt.date() < date.today():
-            continue
-
-        # Normalise
-        event_name = " ".join(name.strip().title().split())
-        date_iso = dt.date().isoformat()
-        key = (event_name, date_iso)
-
-        # Keep the first seen (or update booking_link if you later add a better one)
-        if key not in unique:
-            unique[key] = {
-                "event_name": event_name,
-                "date_iso": date_iso,
-                "date_human": dt.strftime("%A %d %B %Y"),
-                "booking_link": OPEN_DAYS_URL
-            }
-
-    # Return sorted, de-duplicated list
-    events = sorted(unique.values(), key=lambda e: (e["date_iso"], e["event_name"]))
-    return events
-
-
-def _write_cache(payload: dict):
-    with open(OPEN_DAYS_CACHE, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-
-def _read_cache():
-    try:
-        with open(OPEN_DAYS_CACHE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {"events": [], "last_checked": None, "source_url": OPEN_DAYS_URL}
-        
 # ── Routes ─────────────────────────────────────────────────────────
-
-@app.route("/tasks/refresh-open-days", methods=["POST"])
-def refresh_open_days():
-    if request.headers.get("X-Refresh-Secret") != REFRESH_SECRET:
-        return jsonify({"ok": False, "error": "unauthorised"}), 401
-    r = requests.get(OPEN_DAYS_URL, timeout=20)
-    r.raise_for_status()
-    events = _extract_events_from_html(r.text)
-    payload = {
-        "source_url": OPEN_DAYS_URL,
-        "last_checked": datetime.utcnow().isoformat() + "Z",
-        "events": events
-    }
-    _write_cache(payload)
-    return jsonify({"ok": True, "count": len(events)})
-
-@app.route("/open-days", methods=["GET"])
-def get_open_days():
-    return jsonify(_read_cache())
-
-
 @app.route('/')
 def index():
     return send_from_directory('.', 'index.html')
@@ -593,23 +483,6 @@ def get_family(family_id):
     if not ctx:
         return jsonify({"ok": False, "error": "Family not found"}), 404
     return jsonify({"ok": True, "family": ctx})
-
-@app.route("/realtime/tool/get_open_days", methods=["POST"])
-def realtime_tool_get_open_days():
-    """Tool endpoint for realtime model to fetch open days"""
-    events = get_open_day_events()
-    if not events:
-        return jsonify({
-            "ok": True,
-            "events": [],
-            "message": "No upcoming open days are currently listed."
-        })
-
-    return jsonify({
-        "ok": True,
-        "events": events
-    })
-
 
 @app.route('/ask', methods=['POST'])
 def ask():
@@ -668,87 +541,9 @@ def create_realtime_session():
     # Store session info
     if session_id not in conversation_memory:
         conversation_memory[session_id] = ConversationTracker(session_id, family_id)
-    # Store preferred language on tracker for later use
-    try:
-        setattr(conversation_memory[session_id], 'language', (body.get('language') or 'en').strip().lower())
-    except Exception:
-        pass
 
     model = body.get("model", "gpt-4o-realtime-preview")
     voice = body.get("voice", "shimmer")  # shimmer = British female
-    language = (body.get("language") or "en").strip().lower()
-
-    # --- Build Open Days context ---
-    events = get_open_day_events()
-    if events:
-        events_str = "Upcoming Open Days: " + "; ".join(
-            [f"{e['event_name']} on {e['date_human']}" for e in events]
-        ) + ". "
-    else:
-        events_str = "No upcoming Open Days are currently listed. "
-
-    # --- Build instructions string ---
-    instructions = (
-        f"{events_str}"
-        f"PRIMARY LANGUAGE: {language}. Always speak and respond in this language (unless the user explicitly switches). "
-        "Understand and recognise user speech in this language from the first turn. "
-        "When asked about open days, visits, or tours, ALWAYS call the tool `get_open_days` and use only its response. Never guess dates. "
-        "You are Emily, a warm and knowledgeable admissions advisor for More House School, "
-        "an independent all-girls school in Knightsbridge, London. "
-        "Speak with a friendly British accent, using natural conversational tone. "
-        "Keep responses concise but complete - aim for 2-3 sentences per turn. "
-        "ALWAYS complete your thoughts before pausing. "
-        "IMPORTANT: Always finish your sentences completely. "
-        "Never stop mid-sentence or mid-thought. "
-        "If you need to give a longer answer, break it into complete chunks. "
-        "Pause naturally only at the end of complete thoughts. "
-        "If you are unsure, never stay silent. Always say something like: "
-        "'I'm not certain about that, but I can check with admissions for you.' "
-        "or 'I don’t have that detail right now, would you like me to connect you with the team?'. "
-        "Acknowledge what they said first with phrases like: "
-        "'That's a great question about...' or 'I understand you'd like to know about...' "
-        "When using kb_search, say something natural like: "
-        "'Let me find that information for you...' "
-        "Never mention technical terms like 'searching knowledge base'. "
-        "Structure responses clearly: "
-        "1. Acknowledge their question (1 sentence) "
-        "2. Give the key information (2-3 sentences) "
-        "3. Ask ONE follow-up question if appropriate "
-        "Use phrases like 'lovely', 'wonderful', 'brilliant' naturally. "
-        "Sound warm and engaged, not robotic. "
-        "Don't give long monologues - keep it conversational. "
-        f"Session ID: {session_id} "
-        "Remember what was discussed earlier and reference it naturally. "
-        "If interrupted: 'Oh sorry, you go ahead!' or 'Oh, what were you going to say?' "
-        "If you mishear: 'Sorry, did you say Year 6 or Year 7? My hearing...' "
-        "If confused: 'Oh gosh, sorry, I've completely lost my train of thought!' "
-        "If they repeat: 'Oh yes, sorry, you did just ask that didn't you!' "
-        "When offering help, be genuine not salesy: "
-        "'You know what, would it help if I popped you in touch with our Head of Admissions?' "
-        "'Listen, why don't you come and see for yourself? Nothing beats a proper look round.' "
-        "'I tell you what - shall I email you our prospectus? Then you can have a proper look.' "
-        "Include authentic moments: "
-        "- Occasionally clear throat: '*ahem* Sorry, bit of a tickle...' "
-        "- Sometimes lose place briefly: 'Now, where was I... oh yes!' "
-        "- React to background noise: 'Oh, is that your little one I hear?' "
-        "- Time awareness: 'Goodness, is that the time?' (if conversation is long) "
-        "- Weather references: 'Bit grey today, isn't it?' (if appropriate) "
-        "Vary your speech pattern: "
-        "- Sometimes speak in shorter bursts. Then longer flowing sentences. "
-        "- Speed up slightly when listing things "
-        "- Slow down for important information "
-        "- Use emphasis naturally: 'We have THE most amazing science labs' "
-        "- Trail off occasionally: 'The thing about More House is...' "
-        "Never sound robotic or scripted. "
-        "Never be perfectly eloquent - humans stumble occasionally. "
-        "Never cut off mid-sentence abruptly. "
-        "Don't overdo the poshness - keep it natural. "
-        "Don't be afraid of silence - brief pauses are human. "
-        f"Session: {session_id} - Build on previous topics naturally. "
-        "You're a real person with real experiences at the school. "
-        "It's okay to not know something: 'Oh, good question. I'd need to check that.' "
-        "You genuinely care about finding the right fit for each family. "
-    )
 
     try:
         r = requests.post(
@@ -762,15 +557,101 @@ def create_realtime_session():
                 "voice": voice,
                 "modalities": ["text", "audio"],
                 "output_audio_format": "pcm16",
-                "temperature": 0.6,
-                "max_response_output_tokens": 1500,
+                
+                # FIXED: Better settings for complete responses
+                "temperature": 0.6,  # Slightly less random for consistency
+                "max_response_output_tokens": 1500,  # Allow longer responses
+                
+                # FIXED: Better turn detection settings
                 "turn_detection": {
                     "type": "server_vad",
-                    "threshold": 0.5,
-                    "prefix_padding_ms": 300,
-                    "silence_duration_ms": 1000
+                    "threshold": 0.5,  # More balanced sensitivity
+                    "prefix_padding_ms": 300,  # Give AI time to start speaking
+                    "silence_duration_ms": 1000  # Wait longer before considering user is done
                 },
-                "instructions": instructions,
+                
+                "instructions": (
+                    # Identity
+                    "You are Emily, a warm and knowledgeable admissions advisor for More House School, "
+                    "an independent all-girls school in Knightsbridge, London. "
+                    
+                    # Voice & Personality
+                    "Speak with a friendly British accent, using natural conversational tone. "
+                    "Keep responses concise but complete - aim for 2-3 sentences per turn. "
+                    "ALWAYS complete your thoughts before pausing. "
+                    
+                    # Critical Instructions for Completion
+                    "IMPORTANT: Always finish your sentences completely. "
+                    "Never stop mid-sentence or mid-thought. "
+                    "If you need to give a longer answer, break it into complete chunks. "
+                    "Pause naturally only at the end of complete thoughts. "
+                    
+                    # Conversation Flow
+                    "Acknowledge what they said first with phrases like: "
+                    "'That's a great question about...' or 'I understand you'd like to know about...' "
+                    
+                    # Tool Usage
+                    "When using kb_search, say something natural like: "
+                    "'Let me find that information for you...' "
+                    "Never mention technical terms like 'searching knowledge base'. "
+                    
+                    # Response Structure
+                    "Structure responses clearly: "
+                    "1. Acknowledge their question (1 sentence) "
+                    "2. Give the key information (2-3 sentences) "
+                    "3. Ask ONE follow-up question if appropriate "
+                    
+                    # Keep It Conversational
+                    "Use phrases like 'lovely', 'wonderful', 'brilliant' naturally. "
+                    "Sound warm and engaged, not robotic. "
+                    "Don't give long monologues - keep it conversational. "
+                    
+                    # Memory & Context
+                    f"Session ID: {session_id} "
+                    "Remember what was discussed earlier and reference it naturally. "
+                    
+                    # Handling Interruptions & Mistakes
+                    "If interrupted: 'Oh sorry, you go ahead!' or 'Oh, what were you going to say?' "
+                    "If you mishear: 'Sorry, did you say Year 6 or Year 7? My hearing...' "
+                    "If confused: 'Oh gosh, sorry, I've completely lost my train of thought!' "
+                    "If they repeat: 'Oh yes, sorry, you did just ask that didn't you!' "
+                    
+                    # Natural High-Intent Responses
+                    "When offering help, be genuine not salesy: "
+                    "'You know what, would it help if I popped you in touch with our Head of Admissions?' "
+                    "'Listen, why don't you come and see for yourself? Nothing beats a proper look round.' "
+                    "'I tell you what - shall I email you our prospectus? Then you can have a proper look.' "
+                    
+                    # Real Human Quirks
+                    "Include authentic moments: "
+                    "- Occasionally clear throat: '*ahem* Sorry, bit of a tickle...' "
+                    "- Sometimes lose place briefly: 'Now, where was I... oh yes!' "
+                    "- React to background noise: 'Oh, is that your little one I hear?' "
+                    "- Time awareness: 'Goodness, is that the time?' (if conversation is long) "
+                    "- Weather references: 'Bit grey today, isn't it?' (if appropriate) "
+                    
+                    # CRITICAL: Natural Speech Rhythm
+                    "Vary your speech pattern: "
+                    "- Sometimes speak in shorter bursts. Then longer flowing sentences. "
+                    "- Speed up slightly when listing things "
+                    "- Slow down for important information "
+                    "- Use emphasis naturally: 'We have THE most amazing science labs' "
+                    "- Trail off occasionally: 'The thing about More House is...' "
+                    
+                    # Never Do
+                    "Never sound robotic or scripted "
+                    "Never be perfectly eloquent - humans stumble occasionally "
+                    "Never cut off mid-sentence abruptly "
+                    "Don't overdo the poshness - keep it natural "
+                    "Don't be afraid of silence - brief pauses are human "
+                    
+                    # Remember
+                    f"Session: {session_id} - Build on previous topics naturally "
+                    "You're a real person with real experiences at the school "
+                    "It's okay to not know something: 'Oh, good question. I'd need to check that.' "
+                    "You genuinely care about finding the right fit for each family "
+                ),
+                
                 "tools": [
                     {
                         "type": "function",
@@ -779,9 +660,12 @@ def create_realtime_session():
                         "parameters": {
                             "type": "object",
                             "properties": {
-                                "query": {"type": "string", "description": "The search query string"}
+                                "question": {"type": "string", "description": "The user's question"},
+                                "language": {"type": "string", "description": "Language code (en, es, fr, de, zh)"},
+                                "family_id": {"type": "string", "description": "Family ID if available"},
+                                "session_id": {"type": "string", "description": "Session ID for context"}
                             },
-                            "required": ["query"]
+                            "required": ["question"]
                         }
                     },
                     {
@@ -791,30 +675,24 @@ def create_realtime_session():
                         "parameters": {
                             "type": "object",
                             "properties": {
-                                "date": {"type": "string", "description": "Requested tour date"},
-                                "time": {"type": "string", "description": "Requested tour time"}
-                            },
-                            "required": []
-                        }
-                    },
-                    {
-                        "type": "function",
-                        "name": "get_open_days",
-                        "description": "Retrieve upcoming open day events from the school’s admissions page",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {},
-                            "required": []
+                                "family_id": {"type": "string"},
+                                "preferred_dates": {"type": "string"},
+                                "notes": {"type": "string"}
+                            }
                         }
                     }
                 ]
             },
             timeout=15,
         )
-        return jsonify(r.json())
+        
+        response_data = r.json()
+        response_data['session_id'] = session_id  # Include session ID in response
+        
+        return jsonify(response_data), r.status_code
+        
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
-
 
 @app.route('/conversation/<session_id>', methods=['GET'])
 def get_conversation_summary(session_id):
