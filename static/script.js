@@ -1,5 +1,3 @@
-<!-- script.js (self-injecting backup) -->
-<script>
 /* ────────────────────────────────────────────────────────────
    PEN.ai Chatbot – self-injecting backup (bubble + consent UI)
    - Injects minimal HTML + styles if missing
@@ -331,4 +329,3 @@ document.addEventListener("DOMContentLoaded", () => {
     document.body.appendChild(s);
   }
 });
-</script>
