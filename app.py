@@ -848,8 +848,7 @@ def create_realtime_session():
 
 @app.route("/embed")
 def embed_route():
-    """Serve the embed page for iframe usage"""
-    # Use absolute URLs for iframe context
+    """Serve the embed page with debugging"""
     chatbot_origin = "https://emily-more-house.onrender.com"
     
     html = f"""<!doctype html>
@@ -864,32 +863,50 @@ def embed_route():
   <script>
     window.PENAI_CHATBOT_ORIGIN = "{chatbot_origin}";
     window.PENAI_VOICE_LANG = (navigator.language||'en').slice(0,2);
+    
+    // Debug logging
+    console.log('Embed page loaded');
+    console.log('PENAI_CHATBOT_ORIGIN:', window.PENAI_CHATBOT_ORIGIN);
+    
+    // Monitor DOM changes
+    window.addEventListener('DOMContentLoaded', function() {{
+      console.log('DOM ready, penai-root exists:', !!document.getElementById('penai-root'));
+      
+      // Check what gets created after script loads
+      setTimeout(function() {{
+        console.log('After 1s - Elements created:');
+        console.log('- penai-toggle:', !!document.getElementById('penai-toggle'));
+        console.log('- penai-chatbox:', !!document.getElementById('penai-chatbox'));
+        console.log('- penai-styles:', !!document.getElementById('penai-styles'));
+        
+        // Check if the toggle button is visible
+        var toggle = document.getElementById('penai-toggle');
+        if (toggle) {{
+          var rect = toggle.getBoundingClientRect();
+          console.log('Toggle button position:', rect);
+          console.log('Toggle button computed style:', window.getComputedStyle(toggle).cssText);
+        }}
+      }}, 1000);
+    }});
   </script>
 </head>
 <body>
   <div id="penai-root"></div>
   
-  <!-- Use absolute URLs for iframe context -->
-  <script src="{chatbot_origin}/static/script.js" defer></script>
-  
-  <!-- Fallback check -->
-  <script>
-    setTimeout(function() {{
-      if (!document.getElementById('penai-toggle')) {{
-        console.error('Chat UI not created - script.js may have failed');
-      }}
-    }}, 3000);
+  <!-- Load script with error handling -->
+  <script 
+    src="{chatbot_origin}/static/script.js" 
+    onload="console.log('script.js loaded successfully')"
+    onerror="console.error('script.js failed to load')"
+    defer>
   </script>
 </body>
 </html>"""
     
     resp = make_response(html)
-    # Allow iframe embedding
     resp.headers['X-Frame-Options'] = 'ALLOWALL'
     resp.headers['Content-Type'] = 'text/html; charset=utf-8'
-    # Add CORS headers for iframe context
     resp.headers['Access-Control-Allow-Origin'] = '*'
-    resp.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
     return resp
 
 @app.route('/conversation/<session_id>', methods=['GET'])
