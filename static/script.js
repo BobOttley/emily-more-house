@@ -61,6 +61,22 @@ const CHATBOT_ORIGIN = window.PENAI_CHATBOT_ORIGIN || "https://emily-more-house.
   document.head.appendChild(style);
 })();
 
+// === NEW: Helper function to send resize messages to parent window ===
+function sendResizeMessage(width, height) {
+  try {
+    if (window.parent && window.parent !== window) {
+      console.log(`📏 Sending resize message: ${width}x${height}`);
+      window.parent.postMessage({
+        type: 'penai:resize',
+        w: width,
+        h: height
+      }, '*');
+    }
+  } catch (e) {
+    console.log('Could not send resize message:', e);
+  }
+}
+
 // === 3) Inject required DOM if missing ===
 function ensureEl(tag, attrs = {}, parent = document.body) {
   const el = document.createElement(tag);
@@ -117,7 +133,7 @@ function ensureChatSkeleton() {
     ensureEl("button", { id: "send-button", text: "Send" }, inputRow);
   }
 
-  // Voice consent modal + indicator + audio (so realtime-voice-handsfree.js won’t crash)
+  // Voice consent modal + indicator + audio (so realtime-voice-handsfree.js won't crash)
   if (!document.getElementById("voiceConsent")) {
     const modal = ensureEl("div", { id: "voiceConsent", style: "position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:999999;" });
     const panel = ensureEl("div", { style: "background:#fff;padding:20px;border-radius:12px;max-width:460px;width:92%;box-shadow:0 8px 30px rgba(0,0,0,.2);" }, modal);
@@ -304,12 +320,26 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Toggle / close
-  document.getElementById("penai-toggle").addEventListener("click", () => {
+  // === FIXED: Toggle / close with resize messages ===
+  toggleBtn.addEventListener("click", () => {
     chatbox.classList.toggle("open");
-    if (chatbox.classList.contains("open")) { updateWelcome(); showInitialButtons(); }
+    if (chatbox.classList.contains("open")) {
+      // Chat opened - resize iframe to full size
+      sendResizeMessage(400, 580);
+      updateWelcome();
+      showInitialButtons();
+      input.focus();
+    } else {
+      // Chat closed - resize iframe back to small bubble
+      sendResizeMessage(64, 64);
+    }
   });
-  closeBtn.addEventListener("click", () => { chatbox.classList.remove("open"); });
+  
+  closeBtn.addEventListener("click", () => {
+    chatbox.classList.remove("open");
+    // Chat closed - resize iframe back to small bubble
+    sendResizeMessage(64, 64);
+  });
 
   // Language + send
   languageSelector.addEventListener("change", () => { currentLanguage = languageSelector.value; updateWelcome(); showInitialButtons(); });
@@ -319,6 +349,11 @@ document.addEventListener("DOMContentLoaded", () => {
   // Init UI
   updateWelcome();
   showInitialButtons();
+
+  // === Send initial resize message on load ===
+  setTimeout(() => {
+    sendResizeMessage(64, 64); // Start with small bubble size
+  }, 100);
 
   // === 5) (Optional) Load the voice helper file automatically from chatbot service if not present ===
   const hasVoice = !!document.querySelector('script[src*="realtime-voice-handsfree.js"]');
