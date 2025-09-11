@@ -30,9 +30,18 @@ load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # ── Flask app ────────────────────────────────────────────────────────────
-app = Flask(__name__, static_url_path='/static')
+app = Flask(__name__, static_folder='static', static_url_path='/static')
 app.secret_key = os.getenv("SECRET_KEY", "dev-key-change-in-production")
-CORS(app)
+
+# Configure CORS to allow iframe embedding
+CORS(app, resources={
+    r"/*": {
+        "origins": "*",
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type"],
+        "supports_credentials": False
+    }
+})
 
 # ── Conversation Memory Store ────────────────────────────────────────────
 conversation_memory = {}  # In production, use Redis or similar
@@ -261,7 +270,7 @@ def safe_trim(v: Any, limit: int = 120) -> str:
     return (s if len(s) <= limit else s[:limit] + "…")
 
 # ── Embedding function ───────────────────────────────────────────────────
-def embed(text: str) -> np.ndarray:
+def embed_text(text: str) -> np.ndarray:
     resp = client.embeddings.create(
         model="text-embedding-3-small",
         input=text.strip()
@@ -270,7 +279,7 @@ def embed(text: str) -> np.ndarray:
 
 # ── Vector search ────────────────────────────────────────────────────────
 def vector_search(query: str, k: int = 10):
-    q_vec = embed(query)
+    q_vec = embed_text(query)
     norm_q = np.linalg.norm(q_vec) + 1e-10
     norms = np.linalg.norm(EMBEDDINGS, axis=1) + 1e-10
     sims = (EMBEDDINGS @ q_vec) / (norms * norm_q)
@@ -580,6 +589,44 @@ def get_open_days():
 def index():
     return send_from_directory('.', 'index.html')
 
+@app.route('/static/<path:filename>')
+def serve_static(filename):
+    """Serve static files with CORS headers for iframe usage"""
+    import os
+    
+    # Check if file exists and get its content
+    file_path = os.path.join('static', filename)
+    
+    if not os.path.exists(file_path):
+        print(f"File not found: {file_path}")
+        return "File not found", 404
+    
+    try:
+        # Read the file content directly
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        response = make_response(content)
+        
+        # Set appropriate content type
+        if filename.endswith('.js'):
+            response.headers['Content-Type'] = 'application/javascript; charset=utf-8'
+        elif filename.endswith('.css'):
+            response.headers['Content-Type'] = 'text/css; charset=utf-8'
+        else:
+            response.headers['Content-Type'] = 'text/plain; charset=utf-8'
+        
+        # Add CORS headers for iframe
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+        
+        print(f"Serving {filename} (size: {len(content)} bytes)")
+        return response
+        
+    except Exception as e:
+        print(f"Error reading {filename}: {e}")
+        return f"Error reading file: {e}", 500
+
 @app.route('/family/<family_id>', methods=['GET'])
 def get_family(family_id):
     if not db_pool:
@@ -811,109 +858,48 @@ def create_realtime_session():
 
 @app.route("/embed")
 def embed_route():
-    html = """<!doctype html>
+    """Serve the embed page for iframe usage"""
+    # Use absolute URLs for iframe context
+    chatbot_origin = "https://emily-more-house.onrender.com"
+    
+    html = f"""<!doctype html>
 <html>
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    html,body{width:100%;height:100%;margin:0;padding:0;background:transparent;overflow:hidden}
-    #penai-root,.penai-container{width:100%;height:100%}
-    /* Minimal consent modal styling */
-    .penai-voice-modal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.35);z-index:2147483000}
-    .penai-voice-card{background:#fff;border-radius:12px;max-width:420px;width:90vw;padding:16px 18px;box-shadow:0 10px 30px rgba(0,0,0,.2);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
-    .penai-voice-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
-    .penai-btn{border:1px solid #ddd;padding:8px 12px;border-radius:8px;background:#f8f8f8;cursor:pointer}
-    .penai-btn.primary{background:#000;color:#fff;border-color:#000}
+    html,body{{width:100%;height:100%;margin:0;padding:0;background:transparent;overflow:hidden}}
+    #penai-root{{width:100%;height:100%}}
   </style>
   <script>
-    window.PENAI_CHATBOT_ORIGIN = "https://emily-more-house.onrender.com";
+    window.PENAI_CHATBOT_ORIGIN = "{chatbot_origin}";
     window.PENAI_VOICE_LANG = (navigator.language||'en').slice(0,2);
   </script>
-  <script src="/static/script.js" defer></script>
 </head>
 <body>
   <div id="penai-root"></div>
-
-  <!-- Consent modal DOM that realtime-voice-handsfree.js expects -->
-  <div id="penai-voice-consent" class="penai-voice-modal" aria-modal="true" role="dialog">
-    <div class="penai-voice-card">
-      <h3 id="penai-voice-consent-title">Enable voice</h3>
-      <p id="penai-voice-consent-desc">To chat by voice, we need one-time permission to use your microphone and play audio responses.</p>
-      <label style="display:flex;gap:8px;margin:10px 0;">
-        <input id="penai-voice-consent-agree" type="checkbox">
-        <span>I agree to voice processing for this session.</span>
-      </label>
-      <div class="penai-voice-actions">
-        <button id="penai-voice-consent-cancel" class="penai-btn">Not now</button>
-        <button id="penai-voice-consent-start" class="penai-btn primary">Start conversation</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Auto-resize up to parent -->
+  
+  <!-- Use absolute URLs for iframe context -->
+  <script src="{chatbot_origin}/static/script.js" defer></script>
+  
+  <!-- Fallback check -->
   <script>
-  (function(){
-    function postSize(w,h){ parent.postMessage({type:'penai:resize', w:Math.round(w), h:Math.round(h)}, "*"); }
-    var target = document.querySelector('.penai-container') || document.getElementById('penai-root') || document.body;
-    function report(){ var r=target.getBoundingClientRect(); postSize(r.width||360, r.height||520); }
-    if (document.readyState==='complete'){ report(); } else { window.addEventListener('load', report); }
-    new ResizeObserver(function(es){ es.forEach(function(e){ postSize(e.contentRect.width, e.contentRect.height); }); }).observe(target);
-    document.addEventListener('penai:state', report);
-  })();
-  </script>
-
-  <!-- Load voice handler with proper timing -->
-  <script>
-  (function(){
-    // Ensure consent DOM exists before loading voice script
-    function ensureConsentDOM(){
-      if (document.getElementById('penai-voice-consent')) {
-        // Check all required elements exist
-        var elements = [
-          'penai-voice-consent',
-          'penai-voice-consent-title', 
-          'penai-voice-consent-desc',
-          'penai-voice-consent-agree',
-          'penai-voice-consent-cancel',
-          'penai-voice-consent-start'
-        ];
-        
-        for(var i = 0; i < elements.length; i++){
-          if (!document.getElementById(elements[i])) {
-            console.warn('Missing consent element:', elements[i]);
-            return false;
-          }
-        }
-        return true;
-      }
-      return false;
-    }
-    
-    function loadVoiceScript(){
-      if (!ensureConsentDOM()) {
-        // Wait and retry
-        setTimeout(loadVoiceScript, 100);
-        return;
-      }
-      
-      var script = document.createElement('script');
-      script.src = '/static/realtime-voice-handsfree.js';
-      script.defer = true;
-      document.body.appendChild(script);
-    }
-    
-    // Start loading process when DOM is ready
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', loadVoiceScript);
-    } else {
-      loadVoiceScript();
-    }
-  })();
+    setTimeout(function() {{
+      if (!document.getElementById('penai-toggle')) {{
+        console.error('Chat UI not created - script.js may have failed');
+      }}
+    }}, 3000);
   </script>
 </body>
 </html>"""
+    
     resp = make_response(html)
+    # Allow iframe embedding
     resp.headers['X-Frame-Options'] = 'ALLOWALL'
+    resp.headers['Content-Type'] = 'text/html; charset=utf-8'
+    # Add CORS headers for iframe context
+    resp.headers['Access-Control-Allow-Origin'] = '*'
+    resp.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
     return resp
 
 @app.route('/conversation/<session_id>', methods=['GET'])
