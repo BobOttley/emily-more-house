@@ -589,43 +589,33 @@ def get_open_days():
 def index():
     return send_from_directory('.', 'index.html')
 
-@app.route('/static/<path:filename>')
-def serve_static(filename):
-    """Serve static files with CORS headers for iframe usage"""
-    import os
-    
-    # Check if file exists and get its content
-    file_path = os.path.join('static', filename)
-    
-    if not os.path.exists(file_path):
-        print(f"File not found: {file_path}")
-        return "File not found", 404
-    
+@app.route('/static/script.js')
+def serve_script_js():
     try:
-        # Read the file content directly
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open('static/script.js', 'r', encoding='utf-8') as f:
             content = f.read()
-        
         response = make_response(content)
-        
-        # Set appropriate content type
-        if filename.endswith('.js'):
-            response.headers['Content-Type'] = 'application/javascript; charset=utf-8'
-        elif filename.endswith('.css'):
-            response.headers['Content-Type'] = 'text/css; charset=utf-8'
-        else:
-            response.headers['Content-Type'] = 'text/plain; charset=utf-8'
-        
-        # Add CORS headers for iframe
+        response.headers['Content-Type'] = 'application/javascript'
         response.headers['Access-Control-Allow-Origin'] = '*'
-        response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
-        
-        print(f"Serving {filename} (size: {len(content)} bytes)")
+        print(f"Serving script.js (size: {len(content)} bytes)")
         return response
-        
     except Exception as e:
-        print(f"Error reading {filename}: {e}")
-        return f"Error reading file: {e}", 500
+        print(f"Error serving script.js: {e}")
+        return "console.error('Failed to load script');", 500
+
+@app.route('/static/realtime-voice-handsfree.js')
+def serve_voice_js():
+    try:
+        with open('static/realtime-voice-handsfree.js', 'r', encoding='utf-8') as f:
+            content = f.read()
+        response = make_response(content)
+        response.headers['Content-Type'] = 'application/javascript'
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        print(f"Serving realtime-voice-handsfree.js (size: {len(content)} bytes)")
+        return response
+    except Exception as e:
+        print(f"Error serving voice script: {e}")
+        return "console.error('Failed to load voice script');", 500
 
 @app.route('/family/<family_id>', methods=['GET'])
 def get_family(family_id):
