@@ -22,22 +22,22 @@ from openai import OpenAI
 from flask import make_response
 
 
-# ── Boot ────────────────────────────────────────────────────────────
+# ── Boot ──────────────────────────────────────────────────────────────────
 print("✅ Flask server is starting")
 load_dotenv()
 
-# ── OpenAI client ───────────────────────────────────────────────────
+# ── OpenAI client ────────────────────────────────────────────────────────
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# ── Flask app ───────────────────────────────────────────────────────
+# ── Flask app ────────────────────────────────────────────────────────────
 app = Flask(__name__, static_url_path='/static')
 app.secret_key = os.getenv("SECRET_KEY", "dev-key-change-in-production")
 CORS(app)
 
-# ── Conversation Memory Store ───────────────────────────────────────
+# ── Conversation Memory Store ────────────────────────────────────────────
 conversation_memory = {}  # In production, use Redis or similar
 
-# ── Postgres (optional) ────────────────────────────────────────────
+# ── Postgres (optional) ──────────────────────────────────────────────────
 HAVE_DB = False
 ConnectionPool = None
 try:
@@ -58,14 +58,14 @@ else:
     if not DATABASE_URL:
         print("⚠️ DATABASE_URL not set. Family context endpoints will be disabled.")
 
-# ── Knowledge base (embeddings already prepared) ───────────────────
+# ── Knowledge base (embeddings already prepared) ────────────────────────
 with open("kb_chunks/kb_chunks.pkl", "rb") as f:
     kb_chunks = pickle.load(f)
 
 EMBEDDINGS = np.array([chunk["embedding"] for chunk in kb_chunks], dtype=np.float32)
 METADATA = kb_chunks
 
-# ── Conversation Intelligence ──────────────────────────────────────
+# ── Conversation Intelligence ────────────────────────────────────────────
 class ConversationTracker:
     def __init__(self, session_id: str, family_id: Optional[str] = None):
         self.session_id = session_id
@@ -125,7 +125,7 @@ class ConversationTracker:
             self.emotional_state == "concerned"
         )
 
-# ── Enhanced Response Builder ──────────────────────────────────────
+# ── Enhanced Response Builder ────────────────────────────────────────────
 class ResponseEnhancer:
     def __init__(self):
         self.follow_up_questions = {
@@ -247,7 +247,7 @@ class ResponseEnhancer:
         else:
             return "general"
 
-# ── Utilities ───────────────────────────────────────────────────────
+# ── Utilities ────────────────────────────────────────────────────────────
 def remove_bullets(text: str) -> str:
     return re.sub(r"^[\s]*([•\-\*\d]+\s*)+", "", text, flags=re.MULTILINE)
 
@@ -260,7 +260,7 @@ def safe_trim(v: Any, limit: int = 120) -> str:
     s = str(v).strip()
     return (s if len(s) <= limit else s[:limit] + "…")
 
-# ── Embedding function ──────────────────────────────────────────────
+# ── Embedding function ───────────────────────────────────────────────────
 def embed(text: str) -> np.ndarray:
     resp = client.embeddings.create(
         model="text-embedding-3-small",
@@ -268,7 +268,7 @@ def embed(text: str) -> np.ndarray:
     )
     return np.array(resp.data[0].embedding, dtype=np.float32)
 
-# ── Vector search ───────────────────────────────────────────────────
+# ── Vector search ────────────────────────────────────────────────────────
 def vector_search(query: str, k: int = 10):
     q_vec = embed(query)
     norm_q = np.linalg.norm(q_vec) + 1e-10
@@ -277,7 +277,7 @@ def vector_search(query: str, k: int = 10):
     idxs = np.argsort(sims)[::-1][:k]
     return sims, idxs
 
-# ── DB helpers ──────────────────────────────────────────────────────
+# ── DB helpers ───────────────────────────────────────────────────────────
 def fetch_family_context(family_id: str) -> Optional[Dict[str, Any]]:
     if not db_pool:
         return None
@@ -352,12 +352,17 @@ def log_interaction_to_db(family_id: str, question: str, answer: str, metadata: 
     except Exception as e:
         print(f"Failed to log interaction: {e}")
 
-# ── Enhanced Answer Logic ───────────────────────────────────────────
+# ── Enhanced Answer Logic ────────────────────────────────────────────────
 from static_qa_config import STATIC_QA_LIST as STATIC_QAS
 from contextualButtons import get_suggestions
 from language_engine import translate
 
 response_enhancer = ResponseEnhancer()
+
+# ── Open Days Scraper + Cache ───────────────────────────────────────────
+OPEN_DAYS_URL = "https://www.morehouse.org.uk/admissions/joining-more-house/"
+OPEN_DAYS_CACHE = "/tmp/open_days.json"  # or use S3 path
+REFRESH_SECRET = os.getenv("OPEN_DAYS_REFRESH_SECRET", "change-me")
 
 def get_open_day_events():
     """Read open days cache and return sorted events"""
@@ -369,12 +374,11 @@ def get_open_day_events():
         print("⚠️ Could not read open days cache:", e)
         return []
 
-
 def find_best_answer(question, language='en', session_id=None, family_id=None):
     q_lower = question.strip().lower()
     print(f"🧠 Processing: {q_lower} | Lang: {language} | Session: {session_id}")
     
-        # Special case: Open Days / Visits
+    # Special case: Open Days / Visits
     open_day_keywords = ["open day", "open morning", "open evening", "visit", "tour"]
     if any(kw in q_lower for kw in open_day_keywords):
         events = get_open_day_events()
@@ -389,11 +393,10 @@ def find_best_answer(question, language='en', session_id=None, family_id=None):
             return answer, next_event["booking_link"], "Open Days", "open_days", "open_days"
         else:
             answer = (
-                "We don’t currently have any upcoming Open Days listed. "
+                "We don't currently have any upcoming Open Days listed. "
                 f"You can check back soon on our [Admissions page]({OPEN_DAYS_URL})."
             )
             return answer, OPEN_DAYS_URL, "Admissions", "open_days", "open_days"
-
 
     # Get or create conversation tracker
     if session_id:
@@ -507,13 +510,6 @@ def find_best_answer(question, language='en', session_id=None, family_id=None):
         
     return no_match_response, None, None, None, "none"
 
-
-
-# ── Open Days Scraper + Cache ──────────────────────────────────────
-OPEN_DAYS_URL = "https://www.morehouse.org.uk/admissions/joining-more-house/"
-OPEN_DAYS_CACHE = "/tmp/open_days.json"  # or use S3 path
-REFRESH_SECRET = os.getenv("OPEN_DAYS_REFRESH_SECRET", "change-me")
-
 def _extract_events_from_html(html: str):
     soup = BeautifulSoup(html, "html.parser")
     text = " ".join(soup.get_text(" ").split())
@@ -548,7 +544,6 @@ def _extract_events_from_html(html: str):
     events = sorted(unique.values(), key=lambda e: (e["date_iso"], e["event_name"]))
     return events
 
-
 def _write_cache(payload: dict):
     with open(OPEN_DAYS_CACHE, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
@@ -560,7 +555,7 @@ def _read_cache():
     except Exception:
         return {"events": [], "last_checked": None, "source_url": OPEN_DAYS_URL}
         
-# ── Routes ─────────────────────────────────────────────────────────
+# ── Routes ───────────────────────────────────────────────────────────────
 
 @app.route("/tasks/refresh-open-days", methods=["POST"])
 def refresh_open_days():
@@ -580,7 +575,6 @@ def refresh_open_days():
 @app.route("/open-days", methods=["GET"])
 def get_open_days():
     return jsonify(_read_cache())
-
 
 @app.route('/')
 def index():
@@ -610,7 +604,6 @@ def realtime_tool_get_open_days():
         "ok": True,
         "events": events
     })
-
 
 @app.route('/ask', methods=['POST'])
 def ask():
@@ -651,7 +644,7 @@ def ask():
         'session_id': session_id
     })
 
-# ── Enhanced Realtime Session for Voice ────────────────────────────
+# ── Enhanced Realtime Session for Voice ─────────────────────────────────
 @app.route("/realtime/session", methods=["POST"])
 def create_realtime_session():
     """Create enhanced voice session with better conversational flow"""
@@ -705,7 +698,7 @@ def create_realtime_session():
         "Pause naturally only at the end of complete thoughts. "
         "If you are unsure, never stay silent. Always say something like: "
         "'I'm not certain about that, but I can check with admissions for you.' "
-        "or 'I don’t have that detail right now, would you like me to connect you with the team?'. "
+        "or 'I don't have that detail right now, would you like me to connect you with the team?'. "
         "Acknowledge what they said first with phrases like: "
         "'That's a great question about...' or 'I understand you'd like to know about...' "
         "When using kb_search, say something natural like: "
@@ -801,7 +794,7 @@ def create_realtime_session():
                     {
                         "type": "function",
                         "name": "get_open_days",
-                        "description": "Retrieve upcoming open day events from the school’s admissions page",
+                        "description": "Retrieve upcoming open day events from the school's admissions page",
                         "parameters": {
                             "type": "object",
                             "properties": {},
@@ -817,7 +810,7 @@ def create_realtime_session():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 @app.route("/embed")
-def embed():
+def embed_route():
     html = """<!doctype html>
 <html>
 <head>
@@ -869,14 +862,59 @@ def embed():
   })();
   </script>
 
-  <!-- Load voice AFTER modal exists -->
-  <script src="/static/realtime-voice-handsfree.js" defer></script>
+  <!-- Load voice handler with proper timing -->
+  <script>
+  (function(){
+    // Ensure consent DOM exists before loading voice script
+    function ensureConsentDOM(){
+      if (document.getElementById('penai-voice-consent')) {
+        // Check all required elements exist
+        var elements = [
+          'penai-voice-consent',
+          'penai-voice-consent-title', 
+          'penai-voice-consent-desc',
+          'penai-voice-consent-agree',
+          'penai-voice-consent-cancel',
+          'penai-voice-consent-start'
+        ];
+        
+        for(var i = 0; i < elements.length; i++){
+          if (!document.getElementById(elements[i])) {
+            console.warn('Missing consent element:', elements[i]);
+            return false;
+          }
+        }
+        return true;
+      }
+      return false;
+    }
+    
+    function loadVoiceScript(){
+      if (!ensureConsentDOM()) {
+        // Wait and retry
+        setTimeout(loadVoiceScript, 100);
+        return;
+      }
+      
+      var script = document.createElement('script');
+      script.src = '/static/realtime-voice-handsfree.js';
+      script.defer = true;
+      document.body.appendChild(script);
+    }
+    
+    // Start loading process when DOM is ready
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', loadVoiceScript);
+    } else {
+      loadVoiceScript();
+    }
+  })();
+  </script>
 </body>
 </html>"""
     resp = make_response(html)
     resp.headers['X-Frame-Options'] = 'ALLOWALL'
     return resp
-
 
 @app.route('/conversation/<session_id>', methods=['GET'])
 def get_conversation_summary(session_id):
