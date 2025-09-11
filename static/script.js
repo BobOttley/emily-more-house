@@ -68,8 +68,8 @@ function sendResizeMessage(width, height) {
       console.log(`📏 Sending resize message: ${width}x${height}`);
       window.parent.postMessage({
         type: 'penai:resize',
-        w: width,
-        h: height
+        w: parseInt(width),
+        h: parseInt(height)
       }, '*');
     }
   } catch (e) {
@@ -325,7 +325,7 @@ document.addEventListener("DOMContentLoaded", () => {
     chatbox.classList.toggle("open");
     if (chatbox.classList.contains("open")) {
       // Chat opened - resize iframe to full size
-      sendResizeMessage(400, 580);
+      sendResizeMessage(400, 600); // Increased height
       updateWelcome();
       showInitialButtons();
       input.focus();
@@ -335,11 +335,17 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
   
+  
   closeBtn.addEventListener("click", () => {
     chatbox.classList.remove("open");
     // Chat closed - resize iframe back to small bubble
     sendResizeMessage(64, 64);
   });
+
+  // Send initial resize message on load
+setTimeout(() => {
+  sendResizeMessage(64, 64); // Start with small bubble size
+}, 1000); // Increased delay to ensure iframe is loaded
 
   // Language + send
   languageSelector.addEventListener("change", () => { currentLanguage = languageSelector.value; updateWelcome(); showInitialButtons(); });
@@ -350,10 +356,7 @@ document.addEventListener("DOMContentLoaded", () => {
   updateWelcome();
   showInitialButtons();
 
-  // === Send initial resize message on load ===
-  setTimeout(() => {
-    sendResizeMessage(64, 64); // Start with small bubble size
-  }, 100);
+  
 
   // === 5) (Optional) Load the voice helper file automatically from chatbot service if not present ===
   const hasVoice = !!document.querySelector('script[src*="realtime-voice-handsfree.js"]');
