@@ -19,6 +19,7 @@ from flask import Flask, request, jsonify, send_from_directory, session
 from flask_cors import CORS
 from dotenv import load_dotenv
 from openai import OpenAI
+from flask import make_response
 
 
 # ── Boot ────────────────────────────────────────────────────────────
@@ -815,6 +816,68 @@ def create_realtime_session():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
+@app.route("/embed")
+def embed():
+    html = """
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html,body{width:100%;height:100%;margin:0;padding:0;background:transparent;overflow:hidden}
+    /* Ensure the bot fits cleanly; update selector if your bot uses a different root */
+    #penai-root,.penai-container{width:100%;height:100%}
+  </style>
+  <script>
+    // Your bot still points to its own origin
+    window.PENAI_CHATBOT_ORIGIN = "https://emily-more-house.onrender.com";
+  </script>
+  <script src="/static/script.js" defer></script>
+  <!-- If voice helper is needed, load it *inside the embed*, not the parent: -->
+  <script src="/static/realtime-voice-handsfree.js" defer></script>
+</head>
+<body>
+  <div id="penai-root"></div>
+
+  <script>
+  (function(){
+    function postSize(w,h){
+      // Start with '*' to prove it works; after testing, replace '*' with your exact prospectus origin
+      parent.postMessage({type:'penai:resize', w:Math.round(w), h:Math.round(h)}, "*");
+    }
+
+    // Observe the element that actually changes size (bubble -> panel)
+    var target = document.querySelector('.penai-container') ||
+                 document.getElementById('penai-root') ||
+                 document.body;
+
+    function report(){
+      var r = target.getBoundingClientRect();
+      postSize(r.width||360, r.height||520);
+    }
+
+    if (document.readyState === 'complete') { report(); }
+    else { window.addEventListener('load', report); }
+
+    var ro = new ResizeObserver(function(entries){
+      for (var i=0;i<entries.length;i++){
+        var cr = entries[i].contentRect;
+        postSize(cr.width, cr.height);
+      }
+    });
+    ro.observe(target);
+
+    // If your bot dispatches an event on open/close, this updates immediately
+    document.addEventListener('penai:state', report);
+  })();
+  </script>
+</body>
+</html>
+    """
+    resp = make_response(html)
+    resp.headers['X-Frame-Options'] = 'ALLOWALL'  # allow embedding by your page
+    return resp
 
 @app.route('/conversation/<session_id>', methods=['GET'])
 def get_conversation_summary(session_id):
