@@ -818,66 +818,65 @@ def create_realtime_session():
 
 @app.route("/embed")
 def embed():
-    html = """
-<!doctype html>
+    html = """<!doctype html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     html,body{width:100%;height:100%;margin:0;padding:0;background:transparent;overflow:hidden}
-    /* Ensure the bot fits cleanly; update selector if your bot uses a different root */
     #penai-root,.penai-container{width:100%;height:100%}
+    /* Minimal consent modal styling */
+    .penai-voice-modal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.35);z-index:2147483000}
+    .penai-voice-card{background:#fff;border-radius:12px;max-width:420px;width:90vw;padding:16px 18px;box-shadow:0 10px 30px rgba(0,0,0,.2);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+    .penai-voice-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
+    .penai-btn{border:1px solid #ddd;padding:8px 12px;border-radius:8px;background:#f8f8f8;cursor:pointer}
+    .penai-btn.primary{background:#000;color:#fff;border-color:#000}
   </style>
   <script>
-    // Your bot still points to its own origin
     window.PENAI_CHATBOT_ORIGIN = "https://emily-more-house.onrender.com";
+    window.PENAI_VOICE_LANG = (navigator.language||'en').slice(0,2);
   </script>
   <script src="/static/script.js" defer></script>
-  <!-- If voice helper is needed, load it *inside the embed*, not the parent: -->
-  <script src="/static/realtime-voice-handsfree.js" defer></script>
 </head>
 <body>
   <div id="penai-root"></div>
 
+  <!-- Consent modal DOM that realtime-voice-handsfree.js expects -->
+  <div id="penai-voice-consent" class="penai-voice-modal" aria-modal="true" role="dialog">
+    <div class="penai-voice-card">
+      <h3 id="penai-voice-consent-title">Enable voice</h3>
+      <p id="penai-voice-consent-desc">To chat by voice, we need one-time permission to use your microphone and play audio responses.</p>
+      <label style="display:flex;gap:8px;margin:10px 0;">
+        <input id="penai-voice-consent-agree" type="checkbox">
+        <span>I agree to voice processing for this session.</span>
+      </label>
+      <div class="penai-voice-actions">
+        <button id="penai-voice-consent-cancel" class="penai-btn">Not now</button>
+        <button id="penai-voice-consent-start" class="penai-btn primary">Start conversation</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Auto-resize up to parent -->
   <script>
   (function(){
-    function postSize(w,h){
-      // Start with '*' to prove it works; after testing, replace '*' with your exact prospectus origin
-      parent.postMessage({type:'penai:resize', w:Math.round(w), h:Math.round(h)}, "*");
-    }
-
-    // Observe the element that actually changes size (bubble -> panel)
-    var target = document.querySelector('.penai-container') ||
-                 document.getElementById('penai-root') ||
-                 document.body;
-
-    function report(){
-      var r = target.getBoundingClientRect();
-      postSize(r.width||360, r.height||520);
-    }
-
-    if (document.readyState === 'complete') { report(); }
-    else { window.addEventListener('load', report); }
-
-    var ro = new ResizeObserver(function(entries){
-      for (var i=0;i<entries.length;i++){
-        var cr = entries[i].contentRect;
-        postSize(cr.width, cr.height);
-      }
-    });
-    ro.observe(target);
-
-    // If your bot dispatches an event on open/close, this updates immediately
+    function postSize(w,h){ parent.postMessage({type:'penai:resize', w:Math.round(w), h:Math.round(h)}, "*"); }
+    var target = document.querySelector('.penai-container') || document.getElementById('penai-root') || document.body;
+    function report(){ var r=target.getBoundingClientRect(); postSize(r.width||360, r.height||520); }
+    if (document.readyState==='complete'){ report(); } else { window.addEventListener('load', report); }
+    new ResizeObserver(function(es){ es.forEach(function(e){ postSize(e.contentRect.width, e.contentRect.height); }); }).observe(target);
     document.addEventListener('penai:state', report);
   })();
   </script>
+
+  <!-- Load voice AFTER modal exists -->
+  <script src="/static/realtime-voice-handsfree.js" defer></script>
 </body>
-</html>
-    """
+</html>"""
     resp = make_response(html)
-    resp.headers['X-Frame-Options'] = 'ALLOWALL'  # allow embedding by your page
+    resp.headers['X-Frame-Options'] = 'ALLOWALL'
     return resp
+
 
 @app.route('/conversation/<session_id>', methods=['GET'])
 def get_conversation_summary(session_id):
