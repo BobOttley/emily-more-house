@@ -15,11 +15,25 @@ import numpy as np
 import requests
 from bs4 import BeautifulSoup
 from dateutil import parser as dateparse
-from flask import Flask, request, jsonify, send_from_directory, session
+from flask import Flask, request, jsonify, send_from_directory, session, redirect
 from flask_cors import CORS
 from dotenv import load_dotenv
 from openai import OpenAI
 from flask import make_response
+
+# Gmail API imports
+import base64
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+try:
+    from google.oauth2.credentials import Credentials
+    from google_auth_oauthlib.flow import Flow
+    from googleapiclient.discovery import build
+    from googleapiclient.errors import HttpError
+    GMAIL_AVAILABLE = True
+except ImportError:
+    print("⚠️ Gmail API libraries not installed. Run: pip install google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client")
+    GMAIL_AVAILABLE = False
 
 
 # ── Boot ──────────────────────────────────────────────────────────────────
@@ -28,6 +42,26 @@ load_dotenv()
 
 # ── OpenAI client ────────────────────────────────────────────────────────
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# ── Gmail API Configuration ──────────────────────────────────────────────
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:5000/auth/callback")
+ADMISSIONS_EMAIL = os.getenv("ADMISSIONS_EMAIL", "office@morehousemail.org.uk")
+
+GMAIL_SCOPES = [
+    'https://www.googleapis.com/auth/gmail.send',
+    'https://www.googleapis.com/auth/gmail.readonly'
+]
+
+if GMAIL_AVAILABLE and GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
+    print("✅ Gmail API configured")
+else:
+    if not GMAIL_AVAILABLE:
+        print("⚠️ Gmail API libraries not available")
+    elif not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        print("⚠️ Gmail OAuth credentials not set (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET)")
+
 
 # ── Flask app ────────────────────────────────────────────────────────────
 app = Flask(__name__, static_folder='static', static_url_path='/static')
@@ -626,6 +660,157 @@ def get_family(family_id):
         return jsonify({"ok": False, "error": "Family not found"}), 404
     return jsonify({"ok": True, "family": ctx})
 
+# ══════════════════════════════════════════════════════════════════════════
+# GMAIL API - OAUTH & EMAIL SENDING
+# ══════════════════════════════════════════════════════════════════════════
+
+@app.route("/auth/google/login")
+def auth_google_login():
+    """Initiate Google OAuth flow for Gmail access"""
+    if not GMAIL_AVAILABLE or not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        return jsonify({"error": "Gmail API not configured"}), 503
+    
+    flow = Flow.from_client_config(
+        {
+            "web": {
+                "client_id": GOOGLE_CLIENT_ID,
+                "client_secret": GOOGLE_CLIENT_SECRET,
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "redirect_uris": [GOOGLE_REDIRECT_URI]
+            }
+        },
+        scopes=GMAIL_SCOPES
+    )
+    flow.redirect_uri = GOOGLE_REDIRECT_URI
+    
+    authorization_url, state = flow.authorization_url(
+        access_type='offline',
+        include_granted_scopes='true',
+        prompt='consent'
+    )
+    
+    session['oauth_state'] = state
+    return redirect(authorization_url)
+
+@app.route("/auth/callback")
+def auth_google_callback():
+    """Handle Google OAuth callback"""
+    if not GMAIL_AVAILABLE:
+        return jsonify({"error": "Gmail API not available"}), 503
+    
+    try:
+        flow = Flow.from_client_config(
+            {
+                "web": {
+                    "client_id": GOOGLE_CLIENT_ID,
+                    "client_secret": GOOGLE_CLIENT_SECRET,
+                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                    "redirect_uris": [GOOGLE_REDIRECT_URI]
+                }
+            },
+            scopes=GMAIL_SCOPES,
+            state=session.get('oauth_state')
+        )
+        flow.redirect_uri = GOOGLE_REDIRECT_URI
+        
+        flow.fetch_token(authorization_response=request.url)
+        credentials = flow.credentials
+        
+        session['google_token'] = credentials.token
+        session['google_refresh_token'] = credentials.refresh_token
+        session['google_token_uri'] = credentials.token_uri
+        session['google_authenticated'] = True
+        
+        print("✅ Gmail OAuth successful")
+        return redirect('/')
+        
+    except Exception as e:
+        print(f"❌ OAuth error: {e}")
+        return jsonify({"error": "Authentication failed", "details": str(e)}), 400
+
+@app.route("/auth/status")
+def auth_status():
+    """Check Gmail authentication status"""
+    return jsonify({
+        "authenticated": session.get('google_authenticated', False),
+        "email_configured": ADMISSIONS_EMAIL
+    })
+
+@app.route("/auth/logout")
+def auth_logout():
+    """Logout and clear Gmail session"""
+    session.pop('google_token', None)
+    session.pop('google_refresh_token', None)
+    session.pop('google_authenticated', None)
+    return jsonify({"ok": True, "message": "Logged out"})
+
+def get_gmail_service():
+    """Get authenticated Gmail API service"""
+    if not GMAIL_AVAILABLE or not session.get('google_token'):
+        return None
+    
+    try:
+        creds = Credentials(
+            token=session['google_token'],
+            refresh_token=session.get('google_refresh_token'),
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=GOOGLE_CLIENT_ID,
+            client_secret=GOOGLE_CLIENT_SECRET,
+            scopes=GMAIL_SCOPES
+        )
+        
+        service = build('gmail', 'v1', credentials=creds)
+        return service
+        
+    except Exception as e:
+        print(f"❌ Gmail service error: {e}")
+        return None
+
+def send_email_via_gmail(to_email: str, cc_email: str, subject: str, body_html: str):
+    """
+    Send email via Gmail API
+    
+    Args:
+        to_email: Recipient (admissions)
+        cc_email: CC recipient (parent)
+        subject: Email subject
+        body_html: HTML body content
+    
+    Returns:
+        (success: bool, message: str)
+    """
+    service = get_gmail_service()
+    if not service:
+        return False, "Not authenticated with Gmail"
+    
+    try:
+        message = MIMEMultipart('alternative')
+        message['To'] = to_email
+        message['Cc'] = cc_email
+        message['Subject'] = subject
+        
+        html_part = MIMEText(body_html, 'html')
+        message.attach(html_part)
+        
+        raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+        
+        result = service.users().messages().send(
+            userId='me',
+            body={'raw': raw}
+        ).execute()
+        
+        print(f"✅ Email sent: {result.get('id')}")
+        return True, "Email sent successfully"
+        
+    except HttpError as error:
+        print(f"❌ Gmail API error: {error}")
+        return False, f"Gmail API error: {str(error)}"
+    except Exception as e:
+        print(f"❌ Email error: {e}")
+        return False, f"Error: {str(e)}"
+
 @app.route("/realtime/tool/get_open_days", methods=["POST"])
 def realtime_tool_get_open_days():
     """Tool endpoint for realtime model to fetch open days"""
@@ -680,6 +865,169 @@ def ask():
         'family_used': bool(family_id),
         'session_id': session_id
     })
+
+@app.route('/ask-with-tools', methods=['POST'])
+def ask_with_tools():
+    """Enhanced /ask endpoint that supports email sending via function calls"""
+    data = request.json or {}
+    question = data.get('question', '')
+    language = data.get('language', 'en')
+    family_id = data.get('family_id')
+    session_id = data.get('session_id') or str(uuid.uuid4())
+    
+    if not question:
+        return jsonify({"answer": "Please ask a question.", "queries": []})
+    
+    # Get family context
+    family_ctx = fetch_family_context(family_id) if family_id else None
+    
+    # Build system prompt
+    system_prompt = f"""You are Emily, the AI assistant for More House School.
+Be warm, helpful, and professional. Use British spelling.
+Language: {language}
+
+When parents want to book a tour or contact admissions, you can help them send an email.
+"""
+    
+    if family_ctx:
+        child_name = family_ctx.get('child_name', 'your daughter')
+        parent_name = family_ctx.get('parent_name', 'Parent')
+        year_group = family_ctx.get('year_group', '')
+        
+        system_prompt += f"""
+        
+FAMILY CONTEXT:
+Parent: {parent_name}
+Child: {child_name}
+Year group: {year_group}
+
+Personalize your responses using this information.
+"""
+    
+    # Define email sending tool
+    tools = [{
+        "type": "function",
+        "function": {
+            "name": "send_enquiry_email",
+            "description": "Send a tour booking or enquiry email to More House admissions. Use when parent wants to book a tour, visit, or contact the school.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "parent_name": {
+                        "type": "string",
+                        "description": "Parent's full name"
+                    },
+                    "parent_email": {
+                        "type": "string",
+                        "description": "Parent's email address"
+                    },
+                    "parent_phone": {
+                        "type": "string",
+                        "description": "Parent's phone number"
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "The enquiry message or tour request details"
+                    }
+                },
+                "required": ["parent_name", "parent_email", "parent_phone", "message"]
+            }
+        }
+    }]
+    
+    try:
+        # Call OpenAI with tools
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": question}
+            ],
+            tools=tools,
+            tool_choice="auto",
+            temperature=0.7,
+            max_tokens=300
+        )
+        
+        message = response.choices[0].message
+        
+        # Handle tool call (email sending)
+        if message.tool_calls:
+            tool_call = message.tool_calls[0]
+            function_args = json.loads(tool_call.function.arguments)
+            
+            # Send email via Gmail
+            success, result_msg = send_email_via_gmail(
+                to_email=ADMISSIONS_EMAIL,
+                cc_email=function_args['parent_email'],
+                subject=f"Tour Enquiry from {function_args['parent_name']}",
+                body_html=f"""
+                <html>
+                  <body style="font-family: Arial, sans-serif;">
+                    <h2 style="color: #091825;">New Tour Enquiry - More House School</h2>
+                    
+                    <table style="border-collapse: collapse; width: 100%; max-width: 600px;">
+                      <tr>
+                        <td style="padding: 8px; font-weight: bold; border-bottom: 1px solid #ddd;">Parent Name:</td>
+                        <td style="padding: 8px; border-bottom: 1px solid #ddd;">{function_args['parent_name']}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 8px; font-weight: bold; border-bottom: 1px solid #ddd;">Email:</td>
+                        <td style="padding: 8px; border-bottom: 1px solid #ddd;">{function_args['parent_email']}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 8px; font-weight: bold; border-bottom: 1px solid #ddd;">Phone:</td>
+                        <td style="padding: 8px; border-bottom: 1px solid #ddd;">{function_args['parent_phone']}</td>
+                      </tr>
+                    </table>
+                    
+                    <h3 style="color: #091825; margin-top: 20px;">Message:</h3>
+                    <p style="background: #f9f9f9; padding: 15px; border-left: 4px solid #FF9F1C;">
+                      {function_args['message']}
+                    </p>
+                    
+                    <p style="color: #666; font-size: 12px; margin-top: 30px;">
+                      <em>This enquiry was sent via Emily, the More House AI assistant.</em>
+                    </p>
+                  </body>
+                </html>
+                """
+            )
+            
+            # Get Emily's follow-up response
+            follow_up_response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": question},
+                    message,
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": f"Email {'sent successfully' if success else 'failed'}: {result_msg}"
+                    }
+                ],
+                temperature=0.7,
+                max_tokens=300
+            )
+            
+            answer = follow_up_response.choices[0].message.content
+        else:
+            answer = message.content
+        
+        return jsonify({
+            "answer": answer,
+            "queries": ["fees", "admissions", "open days", "curriculum"],
+            "session_id": session_id
+        })
+        
+    except Exception as e:
+        print(f"❌ Error in /ask-with-tools: {e}")
+        return jsonify({
+            "answer": "I apologize, but I encountered an error. Please try again.",
+            "queries": [],
+            "error": str(e)
+        }), 500
 
 # ── Enhanced Realtime Session for Voice ─────────────────────────────────
 @app.route("/realtime/session", methods=["POST"])
