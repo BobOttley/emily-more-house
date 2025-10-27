@@ -836,16 +836,20 @@ def realtime_tool_send_email():
     body = data.get('body', '')
     family_id = data.get('family_id')
     
-    # Get family context if available
-    family_ctx = None
+    # Get parent details from request or family context
     parent_email = data.get('parent_email', '')
     parent_name = data.get('parent_name', 'Parent')
+    parent_phone = data.get('parent_phone', '')
     
+    # Try to get family context if available
     if family_id:
         family_ctx = fetch_family_context(family_id)
         if family_ctx:
-            parent_email = family_ctx.get('parent_email', parent_email)
-            parent_name = family_ctx.get('parent_name', parent_name)
+            # Use family context as fallback if not provided in request
+            if not parent_email:
+                parent_email = family_ctx.get('parent_email', '')
+            if not parent_name or parent_name == 'Parent':
+                parent_name = family_ctx.get('parent_name', parent_name)
             child_name = family_ctx.get('child_name', 'your daughter')
     
     # Build HTML email
@@ -862,6 +866,10 @@ def realtime_tool_send_email():
           <tr>
             <td style="padding: 8px; font-weight: bold; border-bottom: 1px solid #ddd;">Email:</td>
             <td style="padding: 8px; border-bottom: 1px solid #ddd;">{parent_email}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px; font-weight: bold; border-bottom: 1px solid #ddd;">Phone:</td>
+            <td style="padding: 8px; border-bottom: 1px solid #ddd;">{parent_phone or 'Not provided'}</td>
           </tr>
           <tr>
             <td style="padding: 8px; font-weight: bold; border-bottom: 1px solid #ddd;">Family ID:</td>
@@ -890,7 +898,7 @@ def realtime_tool_send_email():
     )
     
     if success:
-        print(f"✅ Tour booking email sent for family_id: {family_id}")
+        print(f"✅ Tour booking email sent - Name: {parent_name}, Email: {parent_email}, Phone: {parent_phone}")
         return jsonify({
             "ok": True,
             "success": True,
@@ -1167,6 +1175,7 @@ def create_realtime_session():
     else:
         events_str = "No upcoming Open Days are currently listed. "
 
+    # --- Build instructions string ---
     # --- Build instructions string ---
     instructions = (
         f"{events_str}"

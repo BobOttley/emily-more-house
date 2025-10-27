@@ -1,5 +1,5 @@
 // /static/realtime-voice-handsfree.js
-// âœ… MORE HOUSE SCHOOL VERSION - Full feature parity with Cheltenham College
+// ✅ MORE HOUSE SCHOOL VERSION - FIXED EMAIL SENDING IN VOICE
 (function () {
   // DOM
   const chatbox   = document.getElementById('penai-chatbox');
@@ -37,7 +37,7 @@
     if (fallbackTimer) clearTimeout(fallbackTimer);
     fallbackTimer = setTimeout(() => {
       console.warn("⚠️ No response from Emily, sending fallback.");
-      playFallbackMessage("Sorry, I didn't catch that — could you repeat the question?");
+      playFallbackMessage("Sorry, I didn't catch that – could you repeat the question?");
     }, FALLBACK_TIMEOUT_MS);
   }
 
@@ -230,20 +230,23 @@
         model: 'gpt-4o-realtime-preview',
         voice: voiceByLang[currentLang] || 'shimmer',
         language: currentLang,
-        // ✅ CRITICAL: Register all tools with OpenAI
+        // ✅ CRITICAL: Register all tools with OpenAI - FIXED EMAIL TOOL
         tools: [
           {
             type: 'function',
             name: 'send_email',
-            description: 'Send an email to the admissions team on behalf of the family. Use this when parents want to book a tour, request information, or contact admissions.',
+            description: 'Send an email to the admissions team on behalf of the family. Use this when parents want to book a tour, request information, or contact admissions. You MUST collect parent_name, parent_email, and parent_phone before calling this.',
             parameters: {
               type: 'object',
               properties: {
+                parent_name: { type: 'string', description: 'Full name of the parent/guardian' },
+                parent_email: { type: 'string', description: 'Email address of the parent/guardian' },
+                parent_phone: { type: 'string', description: 'Phone number of the parent/guardian' },
                 subject: { type: 'string', description: 'Email subject line' },
-                body: { type: 'string', description: 'Email body content' },
-                family_id: { type: 'string', description: 'Family ID from context' }
+                body: { type: 'string', description: 'Email body content with the enquiry details' },
+                family_id: { type: 'string', description: 'Family ID from context if available' }
               },
-              required: ['subject', 'body']
+              required: ['parent_name', 'parent_email', 'parent_phone', 'subject', 'body']
             }
           },
           {
@@ -381,7 +384,7 @@
   }
 
   // ============================================================================
-  // 🔧 TOOL EXECUTION - Handle all Emily's function calls
+  // 🔧 TOOL EXECUTION - Handle all Emily's function calls - FIXED EMAIL
   // ============================================================================
   async function executeTool(callId, functionName, argsJson) {
     console.log(`🔧 Executing tool: ${functionName}`, argsJson);
@@ -398,12 +401,15 @@
     
     try {
       if (functionName === 'send_email') {
-        // ✅ CRITICAL: Send email via admissions team
+        // ✅ CRITICAL: Send email via admissions team with ALL required fields
         const response = await fetch('/realtime/tool/send_email', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           body: JSON.stringify({
+            parent_name: args.parent_name,
+            parent_email: args.parent_email,
+            parent_phone: args.parent_phone,
             subject: args.subject,
             body: args.body,
             family_id: args.family_id || familyId
@@ -418,7 +424,7 @@
         result = {
           ok: true,
           success: true,
-          message: "I've sent your message to our admissions team. They'll be in touch shortly!"
+          message: "Perfect! I've sent your enquiry to our admissions team. They'll be in touch within 24 hours via email or phone. Is there anything else you'd like to know about More House?"
         };
         
         console.log('✅ Email sent successfully');
@@ -516,6 +522,7 @@
     cancelFallbackTimer();
   }
 
+  // Extract family_id from URL
   // Extract family_id from URL
   const urlParams = new URLSearchParams(window.location.search);
   familyId = urlParams.get('family_id') || urlParams.get('id') || null;
