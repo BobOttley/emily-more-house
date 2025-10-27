@@ -125,7 +125,7 @@ class ConversationTracker:
         self.last_topic = None
         self.emotional_state = "neutral"
         
-    def add_interaction(self, question: str, answer: str, topic: Optional[str] = None, use_ai_sentiment: bool = True):
+    def add_interaction(self, question: str, answer: str, topic: Optional[str] = None):
         self.interactions.append({
             "timestamp": datetime.now().isoformat(),
             "question": question,
@@ -142,41 +142,11 @@ class ConversationTracker:
         if any(keyword in question.lower() for keyword in high_intent_keywords):
             self.high_intent_signals += 1
             
-        # Sentiment analysis: Use AI if enabled, otherwise use keyword matching
-        if use_ai_sentiment:
-            # AI-powered sentiment analysis (more accurate)
-            self.emotional_state = self.analyze_sentiment_with_ai(question)
-        else:
-            # Fallback: Basic keyword matching
-            concern_keywords = ["worried", "concern", "anxiety", "difficult", "struggle", "help", "support", "nervous"]
-            if any(keyword in question.lower() for keyword in concern_keywords):
-                self.concerns.append(question)
-                self.emotional_state = "concerned"
-            
-    def analyze_sentiment_with_ai(self, question: str) -> str:
-        """Use OpenAI to analyze sentiment more accurately"""
-        try:
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{
-                    "role": "system",
-                    "content": "Analyze the emotional tone of this parent's question about a school. Respond with ONLY one word: positive, neutral, concerned, excited, frustrated, or anxious."
-                }, {
-                    "role": "user",
-                    "content": question
-                }],
-                max_tokens=10,
-                temperature=0.3
-            )
-            sentiment = response.choices[0].message.content.strip().lower()
-            # Validate response
-            valid_sentiments = ["positive", "neutral", "concerned", "excited", "frustrated", "anxious"]
-            if sentiment in valid_sentiments:
-                return sentiment
-            return "neutral"
-        except Exception as e:
-            print(f"⚠️ Sentiment analysis failed: {e}")
-            return "neutral"
+        # Detect concerns
+        concern_keywords = ["worried", "concern", "anxiety", "difficult", "struggle", "help", "support", "nervous"]
+        if any(keyword in question.lower() for keyword in concern_keywords):
+            self.concerns.append(question)
+            self.emotional_state = "concerned"
             
     def get_conversation_summary(self) -> Dict[str, Any]:
         return {
@@ -357,32 +327,17 @@ def fetch_family_context(family_id: str) -> Optional[Dict[str, Any]]:
     sql = """
     SELECT
       id AS family_id,
-      first_name,
-      family_surname,
-      parent_name,
-      parent_email,
-      contact_number,
-      age_group,
-      entry_year,
-      gender,
-      current_school,
-      
-      -- Academic interests (boolean columns)
-      sciences, mathematics, english, languages, humanities, business,
-      drama, music, art, creative_writing, sport, leadership,
-      community_service, outdoor_education,
-      
-      -- Priorities (boolean columns)
-      academic_excellence, pastoral_care, university_preparation,
-      personal_development, career_guidance, extracurricular_opportunities,
-      debating, small_classes, london_location, values_based, university_prep,
-      
-      -- Additional info
-      how_heard, additional_info,
-      country, language
-      
+      COALESCE(child_first_name, child_name)  AS child_first_name,
+      COALESCE(child_last_name, '')           AS child_last_name,
+      COALESCE(year_group, entry_year, '')    AS year_group,
+      COALESCE(boarding_status, '')           AS boarding_status,
+      COALESCE(main_interests, '')            AS main_interests,
+      COALESCE(parent_name, contact_name, '') AS parent_name,
+      COALESCE(parent_email, contact_email, '') AS parent_email,
+      COALESCE(country, '')                   AS country,
+      COALESCE(language_pref, 'en')           AS language_pref
     FROM public.inquiries
-    WHERE id = %s AND (school_id = 2 OR school = 'more-house')
+    WHERE id = %s
     LIMIT 1;
     """
     try:
@@ -394,62 +349,20 @@ def fetch_family_context(family_id: str) -> Optional[Dict[str, Any]]:
                     return None
                 cols = [d.name for d in cur.description]
                 data = dict(zip(cols, row))
-                
-                first_name = (data.get('first_name') or '').strip()
-                family_surname_full = (data.get('family_surname') or '').strip()
-                surname_only = family_surname_full.replace('the ', '').replace('The ', '').replace(' Family', '').replace(' family', '').strip()
-                child_name = f"{first_name} {surname_only}".strip() if first_name and surname_only else first_name or surname_only or None
-                
-                # Build lists of interests from boolean columns
-                interests = []
-                if data.get('sciences'): interests.append('sciences')
-                if data.get('mathematics'): interests.append('mathematics')
-                if data.get('english'): interests.append('English')
-                if data.get('languages'): interests.append('languages')
-                if data.get('humanities'): interests.append('humanities')
-                if data.get('business'): interests.append('business')
-                if data.get('drama'): interests.append('drama')
-                if data.get('music'): interests.append('music')
-                if data.get('art'): interests.append('art')
-                if data.get('creative_writing'): interests.append('creative writing')
-                if data.get('sport'): interests.append('sport')
-                if data.get('leadership'): interests.append('leadership')
-                if data.get('community_service'): interests.append('community service')
-                if data.get('outdoor_education'): interests.append('outdoor education')
-                
-                # Build priorities list
-                priorities = []
-                if data.get('academic_excellence'): priorities.append('academic excellence')
-                if data.get('pastoral_care'): priorities.append('pastoral care')
-                if data.get('university_preparation') or data.get('university_prep'): priorities.append('university preparation')
-                if data.get('personal_development'): priorities.append('personal development')
-                if data.get('career_guidance'): priorities.append('career guidance')
-                if data.get('extracurricular_opportunities'): priorities.append('extracurricular opportunities')
-                if data.get('debating'): priorities.append('debating')
-                if data.get('small_classes'): priorities.append('small classes')
-                if data.get('london_location'): priorities.append('London location')
-                if data.get('values_based'): priorities.append('values-based education')
-                
+                child_name = " ".join(filter(None, [
+                    safe_trim(data.get("child_first_name")),
+                    safe_trim(data.get("child_last_name"))
+                ])).strip()
                 summary = {
                     "family_id": data.get("family_id"),
-                    "child_name": child_name,
-                    "first_name": first_name,
-                    "family_surname": family_surname_full,
-                    "surname_only": surname_only,
-                    "year_group": data.get("age_group"),  # More House uses age_group
-                    "entry_year": data.get("entry_year"),
+                    "child_name": child_name or None,
+                    "year_group": safe_trim(data.get("year_group")),
+                    "boarding_status": safe_trim(data.get("boarding_status")),
+                    "interests": safe_trim(data.get("main_interests")),
+                    "country": safe_trim(data.get("country")),
+                    "language_pref": (data.get("language_pref") or "en")[:5],
                     "parent_name": data.get("parent_name"),
                     "parent_email": data.get("parent_email"),
-                    "contact_number": data.get("contact_number"),
-                    "gender": data.get("gender"),
-                    "current_school": data.get("current_school"),
-                    "country": data.get("country"),
-                    "language_pref": (data.get("language") or "en")[:5],
-                    "interests": ", ".join(interests) if interests else "",
-                    "interests_list": interests,
-                    "priorities": priorities,
-                    "how_heard": data.get("how_heard"),
-                    "additional_info": data.get("additional_info"),
                 }
                 return summary
     except Exception as e:
@@ -481,52 +394,6 @@ def log_interaction_to_db(family_id: str, question: str, answer: str, metadata: 
                 conn.commit()
     except Exception as e:
         print(f"Failed to log interaction: {e}")
-
-def save_conversation_summary_to_db(family_id: str, session_id: str, tracker: ConversationTracker):
-    """Save/update conversation summary for dashboard"""
-    if not db_pool or not family_id:
-        return
-        
-    summary = tracker.get_conversation_summary()
-    
-    sql = """
-    INSERT INTO conversation_summaries 
-    (family_id, session_id, interaction_count, session_duration, topics, high_intent, 
-     emotional_state, concerns, last_topic, should_handoff, updated_at)
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-    ON CONFLICT (session_id) 
-    DO UPDATE SET
-        interaction_count = EXCLUDED.interaction_count,
-        session_duration = EXCLUDED.session_duration,
-        topics = EXCLUDED.topics,
-        high_intent = EXCLUDED.high_intent,
-        emotional_state = EXCLUDED.emotional_state,
-        concerns = EXCLUDED.concerns,
-        last_topic = EXCLUDED.last_topic,
-        should_handoff = EXCLUDED.should_handoff,
-        updated_at = EXCLUDED.updated_at
-    """
-    try:
-        with db_pool.connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(sql, (
-                    family_id,
-                    session_id,
-                    summary['interaction_count'],
-                    summary['session_duration'],
-                    json.dumps(summary['topics']),
-                    summary['high_intent'],
-                    summary['emotional_state'],
-                    json.dumps(summary['concerns']),
-                    summary['last_topic'],
-                    tracker.should_offer_human_handoff(),
-                    datetime.now()
-                ))
-                conn.commit()
-                print(f"✅ Saved conversation summary for family_id: {family_id}, session: {session_id}")
-    except Exception as e:
-        print(f"⚠️ Failed to save conversation summary: {e}")
-
 
 # â”€â”€ Enhanced Answer Logic â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 from static_qa_config import STATIC_QA_LIST as STATIC_QAS
@@ -1084,10 +951,6 @@ def ask():
             'high_intent': tracker.high_intent_signals > 0 if tracker else False
         }
         log_interaction_to_db(family_id, question, answer, metadata)
-        
-        # Save conversation summary for dashboard
-        if tracker and session_id:
-            save_conversation_summary_to_db(family_id, session_id, tracker)
 
     suggestions = get_suggestions(matched_key or question, language=language)
     queries = [s['query'] for s in suggestions]
@@ -1310,6 +1173,12 @@ def create_realtime_session():
         f"PRIMARY LANGUAGE: {language}. Always speak and respond in this language (unless the user explicitly switches). "
         "Understand and recognise user speech in this language from the first turn. "
         "When asked about open days, visits, or tours, ALWAYS call the tool `get_open_days` and use only its response. Never guess dates. "
+        "IMPORTANT: You CAN send emails to the admissions team! When someone wants to book a tour, request a prospectus, "
+        "or contact admissions, you should: "
+        "1. Ask for their full name, email address, and phone number "
+        "2. Confirm what they'd like to request "
+        "3. Use the send_email tool to send their enquiry "
+        "4. Tell them the email has been sent and they'll hear back within 24 hours "
         "You are Emily, a warm and knowledgeable admissions advisor for More House School, "
         "an independent all-girls school in Knightsbridge, London. "
         "Speak with a friendly British accent, using natural conversational tone. "
@@ -1391,6 +1260,37 @@ def create_realtime_session():
                 "tools": [
                     {
                         "type": "function",
+                        "name": "send_email",
+                        "description": "Send an email to More House admissions team. Use when someone wants to book a tour, request a prospectus, or contact admissions.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "parent_name": {
+                                    "type": "string",
+                                    "description": "Full name of the parent (e.g., 'Robert Ottley')"
+                                },
+                                "parent_email": {
+                                    "type": "string",
+                                    "description": "Email address of the parent (e.g., 'robert.ottley@talk21.com')"
+                                },
+                                "parent_phone": {
+                                    "type": "string",
+                                    "description": "Phone number of the parent (e.g., '07879433298')"
+                                },
+                                "subject": {
+                                    "type": "string",
+                                    "description": "Email subject line (e.g., 'Tour Booking Request')"
+                                },
+                                "body": {
+                                    "type": "string",
+                                    "description": "Email body content - include what the parent is requesting"
+                                }
+                            },
+                            "required": ["parent_name", "parent_email", "parent_phone", "subject", "body"]
+                        }
+                    },
+                    {
+                        "type": "function",
                         "name": "kb_search",
                         "description": "Search school knowledge base with conversation context",
                         "parameters": {
@@ -1399,33 +1299,6 @@ def create_realtime_session():
                                 "query": {"type": "string", "description": "The search query string"}
                             },
                             "required": ["query"]
-                        }
-                    },
-                    {
-                        "type": "function",
-                        "name": "send_email",
-                        "description": "Send an email to the admissions team on behalf of the parent (e.g., to request a tour, ask a question, or book an appointment). Use this when parents ask you to contact admissions, send a message, or arrange something.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "subject": {
-                                    "type": "string", 
-                                    "description": "Email subject line (e.g., 'Tour Booking Request')"
-                                },
-                                "body": {
-                                    "type": "string",
-                                    "description": "The message body to send to admissions"
-                                },
-                                "parent_email": {
-                                    "type": "string",
-                                    "description": "Parent's email address (optional, if provided)"
-                                },
-                                "parent_name": {
-                                    "type": "string",
-                                    "description": "Parent's name (optional, if provided)"
-                                }
-                            },
-                            "required": ["subject", "body"]
                         }
                     },
                     {

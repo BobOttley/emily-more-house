@@ -7,6 +7,10 @@
 
 console.log("✅ PEN.ai self-injecting script.js loaded");
 
+// Generate a unique session ID for this chat session
+const sessionId = 'chat-' + Math.random().toString(36).substr(2, 9) + '-' + Date.now();
+console.log("📝 Session ID:", sessionId);
+
 // === 0) Config: set your chatbot backend origin here (or window.PENAI_CHATBOT_ORIGIN) ===
 const CHATBOT_ORIGIN = window.PENAI_CHATBOT_ORIGIN || "https://emily-more-house.onrender.com";
 
@@ -303,7 +307,11 @@ document.addEventListener("DOMContentLoaded", () => {
     fetch("/ask-with-tools", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question: cleanedQ, language: currentLanguage })
+      body: JSON.stringify({ 
+        question: cleanedQ, 
+        language: currentLanguage,
+        session_id: sessionId  // Include session ID for conversation tracking
+      })
     })
     .then(r => r.json())
     .then(data => {
