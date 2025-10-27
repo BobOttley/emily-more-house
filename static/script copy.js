@@ -300,7 +300,7 @@ document.addEventListener("DOMContentLoaded", () => {
     welcomeEl.style.display = "none";
     clearButtons();
 
-    fetch("/ask-with-tools", {
+    fetch("/ask", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ question: cleanedQ, language: currentLanguage })
