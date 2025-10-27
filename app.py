@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PEN.ai Flask backend – Enhanced conversational voice with memory and proactive engagement"""
+"""PEN.ai Flask backend â€“ Enhanced conversational voice with memory and proactive engagement"""
 
 import os
 import re
@@ -32,18 +32,18 @@ try:
     from googleapiclient.errors import HttpError
     GMAIL_AVAILABLE = True
 except ImportError:
-    print("⚠️ Gmail API libraries not installed. Run: pip install google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client")
+    print("âš ï¸ Gmail API libraries not installed. Run: pip install google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client")
     GMAIL_AVAILABLE = False
 
 
-# ── Boot ──────────────────────────────────────────────────────────────────
-print("✅ Flask server is starting")
+# â”€â”€ Boot â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+print("âœ… Flask server is starting")
 load_dotenv()
 
-# ── OpenAI client ────────────────────────────────────────────────────────
+# â”€â”€ OpenAI client â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# ── Gmail API Configuration ──────────────────────────────────────────────
+# â”€â”€ Gmail API Configuration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
 GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:5000/auth/callback")
@@ -55,15 +55,15 @@ GMAIL_SCOPES = [
 ]
 
 if GMAIL_AVAILABLE and GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
-    print("✅ Gmail API configured")
+    print("âœ… Gmail API configured")
 else:
     if not GMAIL_AVAILABLE:
-        print("⚠️ Gmail API libraries not available")
+        print("âš ï¸ Gmail API libraries not available")
     elif not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
-        print("⚠️ Gmail OAuth credentials not set (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET)")
+        print("âš ï¸ Gmail OAuth credentials not set (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET)")
 
 
-# ── Flask app ────────────────────────────────────────────────────────────
+# â”€â”€ Flask app â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 app = Flask(__name__, static_folder='static', static_url_path='/static')
 app.secret_key = os.getenv("SECRET_KEY", "dev-key-change-in-production")
 
@@ -77,38 +77,38 @@ CORS(app, resources={
     }
 })
 
-# ── Conversation Memory Store ────────────────────────────────────────────
+# â”€â”€ Conversation Memory Store â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 conversation_memory = {}  # In production, use Redis or similar
 
-# ── Postgres (optional) ──────────────────────────────────────────────────
+# â”€â”€ Postgres (optional) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 HAVE_DB = False
 ConnectionPool = None
 try:
     from psycopg_pool import ConnectionPool  # type: ignore
     HAVE_DB = True
 except Exception:
-    print("⚠️ psycopg_pool not installed. Run: pip install psycopg[binary,pool]")
+    print("âš ï¸ psycopg_pool not installed. Run: pip install psycopg[binary,pool]")
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 db_pool: Optional[ConnectionPool] = None
 if HAVE_DB and DATABASE_URL:
     try:
         db_pool = ConnectionPool(conninfo=DATABASE_URL, min_size=1, max_size=5, kwargs={"sslmode": "require"})
-        print("🗄️  Postgres pool initialised")
+        print("ðŸ—„ï¸  Postgres pool initialised")
     except Exception as e:
-        print("⚠️ Postgres pool init failed:", e)
+        print("âš ï¸ Postgres pool init failed:", e)
 else:
     if not DATABASE_URL:
-        print("⚠️ DATABASE_URL not set. Family context endpoints will be disabled.")
+        print("âš ï¸ DATABASE_URL not set. Family context endpoints will be disabled.")
 
-# ── Knowledge base (embeddings already prepared) ────────────────────────
+# â”€â”€ Knowledge base (embeddings already prepared) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 with open("kb_chunks/kb_chunks.pkl", "rb") as f:
     kb_chunks = pickle.load(f)
 
 EMBEDDINGS = np.array([chunk["embedding"] for chunk in kb_chunks], dtype=np.float32)
 METADATA = kb_chunks
 
-# ── Conversation Intelligence ────────────────────────────────────────────
+# â”€â”€ Conversation Intelligence â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class ConversationTracker:
     def __init__(self, session_id: str, family_id: Optional[str] = None):
         self.session_id = session_id
@@ -168,7 +168,7 @@ class ConversationTracker:
             self.emotional_state == "concerned"
         )
 
-# ── Enhanced Response Builder ────────────────────────────────────────────
+# â”€â”€ Enhanced Response Builder â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class ResponseEnhancer:
     def __init__(self):
         self.follow_up_questions = {
@@ -290,9 +290,9 @@ class ResponseEnhancer:
         else:
             return "general"
 
-# ── Utilities ────────────────────────────────────────────────────────────
+# â”€â”€ Utilities â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def remove_bullets(text: str) -> str:
-    return re.sub(r"^[\s]*([•\-\*\d]+\s*)+", "", text, flags=re.MULTILINE)
+    return re.sub(r"^[\s]*([â€¢\-\*\d]+\s*)+", "", text, flags=re.MULTILINE)
 
 def format_response(text: str) -> str:
     return re.sub(r"\n{2,}", "\n\n", text.strip())
@@ -301,9 +301,9 @@ def safe_trim(v: Any, limit: int = 120) -> str:
     if v is None:
         return ""
     s = str(v).strip()
-    return (s if len(s) <= limit else s[:limit] + "…")
+    return (s if len(s) <= limit else s[:limit] + "â€¦")
 
-# ── Embedding function ───────────────────────────────────────────────────
+# â”€â”€ Embedding function â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def embed_text(text: str) -> np.ndarray:
     resp = client.embeddings.create(
         model="text-embedding-3-small",
@@ -311,7 +311,7 @@ def embed_text(text: str) -> np.ndarray:
     )
     return np.array(resp.data[0].embedding, dtype=np.float32)
 
-# ── Vector search ────────────────────────────────────────────────────────
+# â”€â”€ Vector search â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def vector_search(query: str, k: int = 10):
     q_vec = embed_text(query)
     norm_q = np.linalg.norm(q_vec) + 1e-10
@@ -320,7 +320,7 @@ def vector_search(query: str, k: int = 10):
     idxs = np.argsort(sims)[::-1][:k]
     return sims, idxs
 
-# ── DB helpers ───────────────────────────────────────────────────────────
+# â”€â”€ DB helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def fetch_family_context(family_id: str) -> Optional[Dict[str, Any]]:
     if not db_pool:
         return None
@@ -395,14 +395,14 @@ def log_interaction_to_db(family_id: str, question: str, answer: str, metadata: 
     except Exception as e:
         print(f"Failed to log interaction: {e}")
 
-# ── Enhanced Answer Logic ────────────────────────────────────────────────
+# â”€â”€ Enhanced Answer Logic â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 from static_qa_config import STATIC_QA_LIST as STATIC_QAS
 from contextualButtons import get_suggestions
 from language_engine import translate
 
 response_enhancer = ResponseEnhancer()
 
-# ── Open Days Scraper + Cache ───────────────────────────────────────────
+# â”€â”€ Open Days Scraper + Cache â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 OPEN_DAYS_URL = "https://www.morehouse.org.uk/admissions/joining-more-house/"
 OPEN_DAYS_CACHE = "/tmp/open_days.json"  # or use S3 path
 REFRESH_SECRET = os.getenv("OPEN_DAYS_REFRESH_SECRET", "change-me")
@@ -414,12 +414,12 @@ def get_open_day_events():
             payload = json.load(f)
             return payload.get("events", [])
     except Exception as e:
-        print("⚠️ Could not read open days cache:", e)
+        print("âš ï¸ Could not read open days cache:", e)
         return []
 
 def find_best_answer(question, language='en', session_id=None, family_id=None):
     q_lower = question.strip().lower()
-    print(f"🧠 Processing: {q_lower} | Lang: {language} | Session: {session_id}")
+    print(f"ðŸ§  Processing: {q_lower} | Lang: {language} | Session: {session_id}")
     
     # Special case: Open Days / Visits
     open_day_keywords = ["open day", "open morning", "open evening", "visit", "tour"]
@@ -455,7 +455,7 @@ def find_best_answer(question, language='en', session_id=None, family_id=None):
             continue
         variants = [qa['key']] + qa.get('variants', [])
         if q_lower in [v.lower() for v in variants]:
-            print(f"✅ Exact match on: {qa['key']}")
+            print(f"âœ… Exact match on: {qa['key']}")
             answer = qa['answer']
             
             # Track interaction
@@ -482,7 +482,7 @@ def find_best_answer(question, language='en', session_id=None, family_id=None):
                 best_match = qa
                 
     if best_match and best_score > 0.8:
-        print(f"🟡 Fuzzy match on: {best_match['key']} (score {best_score:.2f})")
+        print(f"ðŸŸ¡ Fuzzy match on: {best_match['key']} (score {best_score:.2f})")
         answer = best_match['answer']
         
         # Track interaction
@@ -498,7 +498,7 @@ def find_best_answer(question, language='en', session_id=None, family_id=None):
     # RAG fallback with GPT summarisation
     sims, idxs = vector_search(question)
     if len(idxs) > 0:
-        print(f"🔵 Vector match (cos={sims[idxs[0]]:.2f})")
+        print(f"ðŸ”µ Vector match (cos={sims[idxs[0]]:.2f})")
         contexts = [METADATA[i].get("text", "") for i in idxs[:10]]
         
         # Build conversation-aware prompt
@@ -545,7 +545,7 @@ def find_best_answer(question, language='en', session_id=None, family_id=None):
         return clean, meta.get('url'), meta.get('label') or "View document", None, "rag"
 
     # No match
-    print("❌ No suitable match found.")
+    print("âŒ No suitable match found.")
     no_match_response = "I'm sorry, I don't have that specific information to hand. Would you like me to connect you with our admissions team who can help?"
     
     if session_id:
@@ -559,7 +559,7 @@ def _extract_events_from_html(html: str):
 
     pat = re.compile(
         r"(Open (?:Morning|Evening|Day|Event|Sixth Form Open (?:Morning|Evening)))"
-        r"\s*[–-]\s*([A-Za-z]+ \d{1,2} [A-Za-z]+ \d{4})",
+        r"\s*[â€“-]\s*([A-Za-z]+ \d{1,2} [A-Za-z]+ \d{4})",
         re.I
     )
 
@@ -598,7 +598,7 @@ def _read_cache():
     except Exception:
         return {"events": [], "last_checked": None, "source_url": OPEN_DAYS_URL}
         
-# ── Routes ───────────────────────────────────────────────────────────────
+# â”€â”€ Routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @app.route("/tasks/refresh-open-days", methods=["POST"])
 def refresh_open_days():
@@ -660,9 +660,9 @@ def get_family(family_id):
         return jsonify({"ok": False, "error": "Family not found"}), 404
     return jsonify({"ok": True, "family": ctx})
 
-# ══════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # GMAIL API - OAUTH & EMAIL SENDING
-# ══════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @app.route("/auth/google/login")
 def auth_google_login():
@@ -723,11 +723,11 @@ def auth_google_callback():
         session['google_token_uri'] = credentials.token_uri
         session['google_authenticated'] = True
         
-        print("✅ Gmail OAuth successful")
+        print("âœ… Gmail OAuth successful")
         return redirect('/')
         
     except Exception as e:
-        print(f"❌ OAuth error: {e}")
+        print(f"âŒ OAuth error: {e}")
         return jsonify({"error": "Authentication failed", "details": str(e)}), 400
 
 @app.route("/auth/status")
@@ -765,7 +765,7 @@ def get_gmail_service():
         return service
         
     except Exception as e:
-        print(f"❌ Gmail service error: {e}")
+        print(f"âŒ Gmail service error: {e}")
         return None
 
 def send_email_via_gmail(to_email: str, cc_email: str, subject: str, body_html: str):
@@ -801,14 +801,14 @@ def send_email_via_gmail(to_email: str, cc_email: str, subject: str, body_html: 
             body={'raw': raw}
         ).execute()
         
-        print(f"✅ Email sent: {result.get('id')}")
+        print(f"âœ… Email sent: {result.get('id')}")
         return True, "Email sent successfully"
         
     except HttpError as error:
-        print(f"❌ Gmail API error: {error}")
+        print(f"âŒ Gmail API error: {error}")
         return False, f"Gmail API error: {str(error)}"
     except Exception as e:
-        print(f"❌ Email error: {e}")
+        print(f"âŒ Email error: {e}")
         return False, f"Error: {str(e)}"
 
 @app.route("/realtime/tool/get_open_days", methods=["POST"])
@@ -836,20 +836,16 @@ def realtime_tool_send_email():
     body = data.get('body', '')
     family_id = data.get('family_id')
     
-    # Get parent details from request or family context
+    # Get family context if available
+    family_ctx = None
     parent_email = data.get('parent_email', '')
     parent_name = data.get('parent_name', 'Parent')
-    parent_phone = data.get('parent_phone', '')
     
-    # Try to get family context if available
     if family_id:
         family_ctx = fetch_family_context(family_id)
         if family_ctx:
-            # Use family context as fallback if not provided in request
-            if not parent_email:
-                parent_email = family_ctx.get('parent_email', '')
-            if not parent_name or parent_name == 'Parent':
-                parent_name = family_ctx.get('parent_name', parent_name)
+            parent_email = family_ctx.get('parent_email', parent_email)
+            parent_name = family_ctx.get('parent_name', parent_name)
             child_name = family_ctx.get('child_name', 'your daughter')
     
     # Build HTML email
@@ -866,10 +862,6 @@ def realtime_tool_send_email():
           <tr>
             <td style="padding: 8px; font-weight: bold; border-bottom: 1px solid #ddd;">Email:</td>
             <td style="padding: 8px; border-bottom: 1px solid #ddd;">{parent_email}</td>
-          </tr>
-          <tr>
-            <td style="padding: 8px; font-weight: bold; border-bottom: 1px solid #ddd;">Phone:</td>
-            <td style="padding: 8px; border-bottom: 1px solid #ddd;">{parent_phone or 'Not provided'}</td>
           </tr>
           <tr>
             <td style="padding: 8px; font-weight: bold; border-bottom: 1px solid #ddd;">Family ID:</td>
@@ -898,14 +890,14 @@ def realtime_tool_send_email():
     )
     
     if success:
-        print(f"✅ Tour booking email sent - Name: {parent_name}, Email: {parent_email}, Phone: {parent_phone}")
+        print(f"âœ… Tour booking email sent for family_id: {family_id}")
         return jsonify({
             "ok": True,
             "success": True,
             "message": "Email sent successfully to admissions team"
         })
     else:
-        print(f"❌ Failed to send email: {message}")
+        print(f"âŒ Failed to send email: {message}")
         return jsonify({
             "ok": False,
             "error": message
@@ -1131,14 +1123,14 @@ Personalize your responses using this information.
         })
         
     except Exception as e:
-        print(f"❌ Error in /ask-with-tools: {e}")
+        print(f"âŒ Error in /ask-with-tools: {e}")
         return jsonify({
             "answer": "I apologize, but I encountered an error. Please try again.",
             "queries": [],
             "error": str(e)
         }), 500
 
-# ── Enhanced Realtime Session for Voice ─────────────────────────────────
+# â”€â”€ Enhanced Realtime Session for Voice â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @app.route("/realtime/session", methods=["POST"])
 def create_realtime_session():
     """Create enhanced voice session with better conversational flow"""
@@ -1175,7 +1167,6 @@ def create_realtime_session():
     else:
         events_str = "No upcoming Open Days are currently listed. "
 
-    # --- Build instructions string ---
     # --- Build instructions string ---
     instructions = (
         f"{events_str}"
@@ -1261,6 +1252,37 @@ def create_realtime_session():
                 },
                 "instructions": instructions,
                 "tools": [
+                    {
+                        "type": "function",
+                        "name": "send_email",
+                        "description": "Send an email to More House School admissions team. When a parent wants to book a tour, request information, or make an enquiry, you MUST first collect their full name, email address, and phone number, then call this function. Always CC the parent on the email.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "parent_name": {
+                                    "type": "string",
+                                    "description": "Full name of the parent/guardian"
+                                },
+                                "parent_email": {
+                                    "type": "string",
+                                    "description": "Email address of the parent - they will be CC'd on the email"
+                                },
+                                "parent_phone": {
+                                    "type": "string",
+                                    "description": "Phone number of the parent for follow-up"
+                                },
+                                "subject": {
+                                    "type": "string",
+                                    "description": "Email subject line (e.g., 'Tour Booking Request')"
+                                },
+                                "body": {
+                                    "type": "string",
+                                    "description": "Email body content - include what the parent is requesting"
+                                }
+                            },
+                            "required": ["parent_name", "parent_email", "parent_phone", "subject", "body"]
+                        }
+                    },
                     {
                         "type": "function",
                         "name": "kb_search",
