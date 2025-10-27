@@ -125,7 +125,7 @@ class ConversationTracker:
         self.last_topic = None
         self.emotional_state = "neutral"
         
-    def add_interaction(self, question: str, answer: str, topic: Optional[str] = None):
+    def add_interaction(self, question: str, answer: str, topic: Optional[str] = None, use_ai_sentiment: bool = True):
         self.interactions.append({
             "timestamp": datetime.now().isoformat(),
             "question": question,
@@ -142,11 +142,41 @@ class ConversationTracker:
         if any(keyword in question.lower() for keyword in high_intent_keywords):
             self.high_intent_signals += 1
             
-        # Detect concerns
-        concern_keywords = ["worried", "concern", "anxiety", "difficult", "struggle", "help", "support", "nervous"]
-        if any(keyword in question.lower() for keyword in concern_keywords):
-            self.concerns.append(question)
-            self.emotional_state = "concerned"
+        # Sentiment analysis: Use AI if enabled, otherwise use keyword matching
+        if use_ai_sentiment:
+            # AI-powered sentiment analysis (more accurate)
+            self.emotional_state = self.analyze_sentiment_with_ai(question)
+        else:
+            # Fallback: Basic keyword matching
+            concern_keywords = ["worried", "concern", "anxiety", "difficult", "struggle", "help", "support", "nervous"]
+            if any(keyword in question.lower() for keyword in concern_keywords):
+                self.concerns.append(question)
+                self.emotional_state = "concerned"
+            
+    def analyze_sentiment_with_ai(self, question: str) -> str:
+        """Use OpenAI to analyze sentiment more accurately"""
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{
+                    "role": "system",
+                    "content": "Analyze the emotional tone of this parent's question about a school. Respond with ONLY one word: positive, neutral, concerned, excited, frustrated, or anxious."
+                }, {
+                    "role": "user",
+                    "content": question
+                }],
+                max_tokens=10,
+                temperature=0.3
+            )
+            sentiment = response.choices[0].message.content.strip().lower()
+            # Validate response
+            valid_sentiments = ["positive", "neutral", "concerned", "excited", "frustrated", "anxious"]
+            if sentiment in valid_sentiments:
+                return sentiment
+            return "neutral"
+        except Exception as e:
+            print(f"⚠️ Sentiment analysis failed: {e}")
+            return "neutral"
             
     def get_conversation_summary(self) -> Dict[str, Any]:
         return {
@@ -451,6 +481,52 @@ def log_interaction_to_db(family_id: str, question: str, answer: str, metadata: 
                 conn.commit()
     except Exception as e:
         print(f"Failed to log interaction: {e}")
+
+def save_conversation_summary_to_db(family_id: str, session_id: str, tracker: ConversationTracker):
+    """Save/update conversation summary for dashboard"""
+    if not db_pool or not family_id:
+        return
+        
+    summary = tracker.get_conversation_summary()
+    
+    sql = """
+    INSERT INTO conversation_summaries 
+    (family_id, session_id, interaction_count, session_duration, topics, high_intent, 
+     emotional_state, concerns, last_topic, should_handoff, updated_at)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    ON CONFLICT (session_id) 
+    DO UPDATE SET
+        interaction_count = EXCLUDED.interaction_count,
+        session_duration = EXCLUDED.session_duration,
+        topics = EXCLUDED.topics,
+        high_intent = EXCLUDED.high_intent,
+        emotional_state = EXCLUDED.emotional_state,
+        concerns = EXCLUDED.concerns,
+        last_topic = EXCLUDED.last_topic,
+        should_handoff = EXCLUDED.should_handoff,
+        updated_at = EXCLUDED.updated_at
+    """
+    try:
+        with db_pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (
+                    family_id,
+                    session_id,
+                    summary['interaction_count'],
+                    summary['session_duration'],
+                    json.dumps(summary['topics']),
+                    summary['high_intent'],
+                    summary['emotional_state'],
+                    json.dumps(summary['concerns']),
+                    summary['last_topic'],
+                    tracker.should_offer_human_handoff(),
+                    datetime.now()
+                ))
+                conn.commit()
+                print(f"✅ Saved conversation summary for family_id: {family_id}, session: {session_id}")
+    except Exception as e:
+        print(f"⚠️ Failed to save conversation summary: {e}")
+
 
 # â”€â”€ Enhanced Answer Logic â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 from static_qa_config import STATIC_QA_LIST as STATIC_QAS
@@ -1008,6 +1084,10 @@ def ask():
             'high_intent': tracker.high_intent_signals > 0 if tracker else False
         }
         log_interaction_to_db(family_id, question, answer, metadata)
+        
+        # Save conversation summary for dashboard
+        if tracker and session_id:
+            save_conversation_summary_to_db(family_id, session_id, tracker)
 
     suggestions = get_suggestions(matched_key or question, language=language)
     queries = [s['query'] for s in suggestions]
