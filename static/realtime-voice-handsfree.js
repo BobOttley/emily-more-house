@@ -1,5 +1,5 @@
 // /static/realtime-voice-handsfree.js
-// ✅ MORE HOUSE SCHOOL VERSION - FIXED EMAIL SENDING IN VOICE
+// Ã¢Å“â€¦ MORE HOUSE SCHOOL VERSION - Full feature parity with Cheltenham College
 (function () {
   // DOM
   const chatbox   = document.getElementById('penai-chatbox');
@@ -36,8 +36,8 @@
   function resetFallbackTimer() {
     if (fallbackTimer) clearTimeout(fallbackTimer);
     fallbackTimer = setTimeout(() => {
-      console.warn("⚠️ No response from Emily, sending fallback.");
-      playFallbackMessage("Sorry, I didn't catch that – could you repeat the question?");
+      console.warn("âš ï¸ No response from Emily, sending fallback.");
+      playFallbackMessage("Sorry, I didn't catch that â€” could you repeat the question?");
     }, FALLBACK_TIMEOUT_MS);
   }
 
@@ -60,7 +60,7 @@
   }
 
   // ============================================================================
-  // 🇬🇧 Language → Voice Mapping
+  // ðŸ‡¬ðŸ‡§ Language â†’ Voice Mapping
   // ============================================================================
   const voiceByLang = {
     en: 'shimmer',  // British RP accent
@@ -76,13 +76,13 @@
   // Localisation for consent
   const i18n = {
     en: { title:'Enable Emily (voice)', desc:'To chat by voice, we need one-time permission to use your microphone and play audio responses.', agree:'I agree to voice processing for this session.', cancel:'Not now', start:'Start conversation' },
-    fr: { title:'Activer Emily (voix)', desc:'Pour discuter à la voix, nous avons besoin d\'une autorisation unique pour utiliser votre microphone et lire les réponses audio.', agree:'J\'accepte le traitement vocal pour cette session.', cancel:'Pas maintenant', start:'Commencer la conversation' },
-    es: { title:'Activar Emily (voz)', desc:'Para hablar por voz, necesitamos permiso único para usar tu micrófono y reproducir respuestas de audio.', agree:'Acepto el procesamiento de voz para esta sesión.', cancel:'Ahora no', start:'Iniciar conversación' },
-    de: { title:'Emily (Sprache) aktivieren', desc:'Für die Sprachfunktion benötigen wir einmalige Berechtigung für Ihr Mikrofon und die Audiowiedergabe.', agree:'Ich stimme der Sprachverarbeitung für diese Sitzung zu.', cancel:'Nicht jetzt', start:'Konversation starten' },
-    zh: { title:'启用 Emily（语音）', desc:'要进行语音聊天，我们需要一次性授权使用您的麦克风并播放音频回复。', agree:'我同意在本次会话中进行语音处理。', cancel:'暂不', start:'开始对话' },
-    ar: { title:'تفعيل إيميلي (صوت)', desc:'للدردشة بالصوت، نحتاج إلى إذن لمرة واحدة لاستخدام الميكروفون وتشغيل الردود الصوتية.', agree:'أوافق على معالجة الصوت لهذه الجلسة.', cancel:'ليس الآن', start:'بدء المحادثة' },
+    fr: { title:'Activer Emily (voix)', desc:'Pour discuter Ã  la voix, nous avons besoin d\'une autorisation unique pour utiliser votre microphone et lire les rÃ©ponses audio.', agree:'J\'accepte le traitement vocal pour cette session.', cancel:'Pas maintenant', start:'Commencer la conversation' },
+    es: { title:'Activar Emily (voz)', desc:'Para hablar por voz, necesitamos permiso Ãºnico para usar tu micrÃ³fono y reproducir respuestas de audio.', agree:'Acepto el procesamiento de voz para esta sesiÃ³n.', cancel:'Ahora no', start:'Iniciar conversaciÃ³n' },
+    de: { title:'Emily (Sprache) aktivieren', desc:'FÃ¼r die Sprachfunktion benÃ¶tigen wir einmalige Berechtigung fÃ¼r Ihr Mikrofon und die Audiowiedergabe.', agree:'Ich stimme der Sprachverarbeitung fÃ¼r diese Sitzung zu.', cancel:'Nicht jetzt', start:'Konversation starten' },
+    zh: { title:'å¯ç”¨ Emilyï¼ˆè¯­éŸ³ï¼‰', desc:'è¦è¿›è¡Œè¯­éŸ³èŠå¤©ï¼Œæˆ‘ä»¬éœ€è¦ä¸€æ¬¡æ€§æŽˆæƒä½¿ç”¨æ‚¨çš„éº¦å…‹é£Žå¹¶æ’­æ”¾éŸ³é¢‘å›žå¤ã€‚', agree:'æˆ‘åŒæ„åœ¨æœ¬æ¬¡ä¼šè¯ä¸­è¿›è¡Œè¯­éŸ³å¤„ç†ã€‚', cancel:'æš‚ä¸', start:'å¼€å§‹å¯¹è¯' },
+    ar: { title:'ØªÙØ¹ÙŠÙ„ Ø¥ÙŠÙ…ÙŠÙ„ÙŠ (ØµÙˆØª)', desc:'Ù„Ù„Ø¯Ø±Ø¯Ø´Ø© Ø¨Ø§Ù„ØµÙˆØªØŒ Ù†Ø­ØªØ§Ø¬ Ø¥Ù„Ù‰ Ø¥Ø°Ù† Ù„Ù…Ø±Ø© ÙˆØ§Ø­Ø¯Ø© Ù„Ø§Ø³ØªØ®Ø¯Ø§Ù… Ø§Ù„Ù…ÙŠÙƒØ±ÙˆÙÙˆÙ† ÙˆØªØ´ØºÙŠÙ„ Ø§Ù„Ø±Ø¯ÙˆØ¯ Ø§Ù„ØµÙˆØªÙŠØ©.', agree:'Ø£ÙˆØ§ÙÙ‚ Ø¹Ù„Ù‰ Ù…Ø¹Ø§Ù„Ø¬Ø© Ø§Ù„ØµÙˆØª Ù„Ù‡Ø°Ù‡ Ø§Ù„Ø¬Ù„Ø³Ø©.', cancel:'Ù„ÙŠØ³ Ø§Ù„Ø¢Ù†', start:'Ø¨Ø¯Ø¡ Ø§Ù„Ù…Ø­Ø§Ø¯Ø«Ø©' },
     it: { title:'Abilita Emily (voce)', desc:'Per parlare con la voce, serve un\'autorizzazione una tantum per usare il microfono e riprodurre risposte audio.', agree:'Accetto l\'elaborazione vocale per questa sessione.', cancel:'Non ora', start:'Avvia conversazione' },
-    ru: { title:'Включить Emily (голос)', desc:'Чтобы общаться голосом, нам нужно разовое разрешение на использование вашего микрофона и воспроизведение аудиоответов.', agree:'Я согласен на обработку голоса в этом сеансе.', cancel:'Не сейчас', start:'Начать разговор' }
+    ru: { title:'Ð’ÐºÐ»ÑŽÑ‡Ð¸Ñ‚ÑŒ Emily (Ð³Ð¾Ð»Ð¾Ñ)', desc:'Ð§Ñ‚Ð¾Ð±Ñ‹ Ð¾Ð±Ñ‰Ð°Ñ‚ÑŒÑÑ Ð³Ð¾Ð»Ð¾ÑÐ¾Ð¼, Ð½Ð°Ð¼ Ð½ÑƒÐ¶Ð½Ð¾ Ñ€Ð°Ð·Ð¾Ð²Ð¾Ðµ Ñ€Ð°Ð·Ñ€ÐµÑˆÐµÐ½Ð¸Ðµ Ð½Ð° Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ð½Ð¸Ðµ Ð²Ð°ÑˆÐµÐ³Ð¾ Ð¼Ð¸ÐºÑ€Ð¾Ñ„Ð¾Ð½Ð° Ð¸ Ð²Ð¾ÑÐ¿Ñ€Ð¾Ð¸Ð·Ð²ÐµÐ´ÐµÐ½Ð¸Ðµ Ð°ÑƒÐ´Ð¸Ð¾Ð¾Ñ‚Ð²ÐµÑ‚Ð¾Ð².', agree:'Ð¯ ÑÐ¾Ð³Ð»Ð°ÑÐµÐ½ Ð½Ð° Ð¾Ð±Ñ€Ð°Ð±Ð¾Ñ‚ÐºÑƒ Ð³Ð¾Ð»Ð¾ÑÐ° Ð² ÑÑ‚Ð¾Ð¼ ÑÐµÐ°Ð½ÑÐµ.', cancel:'ÐÐµ ÑÐµÐ¹Ñ‡Ð°Ñ', start:'ÐÐ°Ñ‡Ð°Ñ‚ÑŒ Ñ€Ð°Ð·Ð³Ð¾Ð²Ð¾Ñ€' }
   };
 
   // Localise consent UI
@@ -168,12 +168,12 @@
 
   startBtn?.addEventListener('click', async () => {
     startBtn.disabled = true;
-    showIndicator('Connecting…');
+    showIndicator('Connectingâ€¦');
     try {
       await startVoiceSession();
       consent.style.display = 'none';
       updateUIForStart();
-      showIndicator('Listening…');
+      showIndicator('Listeningâ€¦');
     } catch (err) {
       console.error('Voice start error:', err);
       startBtn.disabled = false;
@@ -206,7 +206,7 @@
     
     // Update UI
     pauseBtn.textContent = isPaused ? 'Resume' : 'Pause';
-    showIndicator(isPaused ? 'Paused' : 'Listening…');
+    showIndicator(isPaused ? 'Paused' : 'Listeningâ€¦');
   });
 
   endBtn?.addEventListener('click', () => {
@@ -230,23 +230,20 @@
         model: 'gpt-4o-realtime-preview',
         voice: voiceByLang[currentLang] || 'shimmer',
         language: currentLang,
-        // ✅ CRITICAL: Register all tools with OpenAI - FIXED EMAIL TOOL
+        // âœ… CRITICAL: Register all tools with OpenAI
         tools: [
           {
             type: 'function',
             name: 'send_email',
-            description: 'Send an email to the admissions team on behalf of the family. Use this when parents want to book a tour, request information, or contact admissions. You MUST collect parent_name, parent_email, and parent_phone before calling this.',
+            description: 'Send an email to the admissions team on behalf of the family. Use this when parents want to book a tour, request information, or contact admissions.',
             parameters: {
               type: 'object',
               properties: {
-                parent_name: { type: 'string', description: 'Full name of the parent/guardian' },
-                parent_email: { type: 'string', description: 'Email address of the parent/guardian' },
-                parent_phone: { type: 'string', description: 'Phone number of the parent/guardian' },
                 subject: { type: 'string', description: 'Email subject line' },
-                body: { type: 'string', description: 'Email body content with the enquiry details' },
-                family_id: { type: 'string', description: 'Family ID from context if available' }
+                body: { type: 'string', description: 'Email body content' },
+                family_id: { type: 'string', description: 'Family ID from context' }
               },
-              required: ['parent_name', 'parent_email', 'parent_phone', 'subject', 'body']
+              required: ['subject', 'body']
             }
           },
           {
@@ -362,17 +359,17 @@
     let msg; try{ msg = JSON.parse(evt.data); } catch { return; }
     switch (msg.type) {
       case 'input_audio_buffer.speech_started':
-        showIndicator('Listening…'); break;
+        showIndicator('Listeningâ€¦'); break;
       case 'input_audio_buffer.speech_stopped':
-        showIndicator('Thinking…');
-        resetFallbackTimer(); // user finished → wait for reply
+        showIndicator('Thinkingâ€¦');
+        resetFallbackTimer(); // user finished â†’ wait for reply
         break;
       case 'response.audio.started':
-        showIndicator('Speaking…');
+        showIndicator('Speakingâ€¦');
         cancelFallbackTimer(); // reply began
         break;
       case 'response.audio.done':
-        showIndicator('Listening…');
+        showIndicator('Listeningâ€¦');
         cancelFallbackTimer(); // reply finished
         break;
       case 'response.function_call_arguments.done':
@@ -384,10 +381,10 @@
   }
 
   // ============================================================================
-  // 🔧 TOOL EXECUTION - Handle all Emily's function calls - FIXED EMAIL
+  // ðŸ”§ TOOL EXECUTION - Handle all Emily's function calls
   // ============================================================================
   async function executeTool(callId, functionName, argsJson) {
-    console.log(`🔧 Executing tool: ${functionName}`, argsJson);
+    console.log(`ðŸ”§ Executing tool: ${functionName}`, argsJson);
     
     let args = {};
     try {
@@ -401,15 +398,12 @@
     
     try {
       if (functionName === 'send_email') {
-        // ✅ CRITICAL: Send email via admissions team with ALL required fields
+        // âœ… CRITICAL: Send email via admissions team
         const response = await fetch('/realtime/tool/send_email', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           body: JSON.stringify({
-            parent_name: args.parent_name,
-            parent_email: args.parent_email,
-            parent_phone: args.parent_phone,
             subject: args.subject,
             body: args.body,
             family_id: args.family_id || familyId
@@ -424,10 +418,10 @@
         result = {
           ok: true,
           success: true,
-          message: "Perfect! I've sent your enquiry to our admissions team. They'll be in touch within 24 hours via email or phone. Is there anything else you'd like to know about More House?"
+          message: "I've sent your message to our admissions team. They'll be in touch shortly!"
         };
         
-        console.log('✅ Email sent successfully');
+        console.log('âœ… Email sent successfully');
         
       } else if (functionName === 'get_family_context') {
         // Call the backend endpoint
@@ -443,7 +437,7 @@
         
         const data = await response.json();
         result = data;
-        console.log('✅ Family context fetched:', data);
+        console.log('âœ… Family context fetched:', data);
         
       } else if (functionName === 'get_open_days') {
         // Call open days endpoint
@@ -459,7 +453,7 @@
         
         const data = await response.json();
         result = data;
-        console.log('✅ Open days fetched:', data);
+        console.log('âœ… Open days fetched:', data);
         
       } else if (functionName === 'kb_search') {
         // Knowledge base search
@@ -480,7 +474,7 @@
         
         const data = await response.json();
         result = { answer: data.answer, url: data.url };
-        console.log('✅ Knowledge search completed');
+        console.log('âœ… Knowledge search completed');
         
       } else if (functionName === 'book_tour') {
         // Book tour - return confirmation
@@ -488,7 +482,7 @@
           ok: true,
           message: "I'll arrange for our admissions team to contact you about booking a tour."
         };
-        console.log('✅ Tour booking requested');
+        console.log('âœ… Tour booking requested');
         
       } else {
         error = `Unknown tool: ${functionName}`;
@@ -522,10 +516,27 @@
     cancelFallbackTimer();
   }
 
-  // Extract family_id from URL
-  // Extract family_id from URL
+  // ============================================================================
+  // PROACTIVE GREETING - Extract family_id from parent page & auto-start
+  // ============================================================================
+  
+  // Extract family_id from URL first
   const urlParams = new URLSearchParams(window.location.search);
   familyId = urlParams.get('family_id') || urlParams.get('id') || null;
+
+  // CRITICAL: Try to get family_id from parent page's meta tag (Emily is in iframe)
+  if (!familyId) {
+    try {
+      const parentDoc = window.parent.document;
+      const meta = parentDoc.querySelector('meta[name="inquiry-id"]');
+      if (meta) {
+        familyId = meta.getAttribute('content');
+        console.log('Family ID from parent meta tag:', familyId);
+      }
+    } catch (e) {
+      console.log('Cannot access parent document (cross-origin)');
+    }
+  }
 
   // Try localStorage as fallback (if Emily is on same domain)
   if (!familyId) {
@@ -534,7 +545,7 @@
       if (stored) {
         const data = JSON.parse(stored);
         familyId = data.id;
-        console.log('✅ Family ID from localStorage:', familyId);
+        console.log('Family ID from localStorage:', familyId);
       }
     } catch (e) {
       console.error('Failed to parse enquiryData:', e);
@@ -542,9 +553,35 @@
   }
 
   if (familyId) {
-    console.log('✅ Emily voice initialized with family_id:', familyId);
+    console.log('Emily voice initialised with family_id:', familyId);
+    
+    // PROACTIVE GREETING: Show consent modal after 10 seconds
+    let greetingTimer = setTimeout(() => {
+      if (!started && consent && consent.style.display !== 'flex') {
+        console.log('Showing voice consent modal for proactive greeting');
+        consent.style.display = 'flex';
+        
+        // Personalise the consent message
+        if (vcDesc) {
+          vcDesc.textContent = 'Welcome! I am Emily, and I can help answer your questions about More House School. To chat by voice, I need permission to use your microphone and play audio responses.';
+        }
+      }
+    }, 10000); // 10 seconds
+    
+    // Cancel timer if user manually opens chatbox
+    if (toggleBtn) {
+      toggleBtn.addEventListener('click', () => {
+        clearTimeout(greetingTimer);
+      }, { once: true });
+    }
+    if (startHeaderBtn) {
+      startHeaderBtn.addEventListener('click', () => {
+        clearTimeout(greetingTimer);
+      }, { once: true });
+    }
+    
   } else {
-    console.log('⚠️ Emily voice initialized without family_id');
+    console.log('Emily voice initialised without family_id');
   }
 
   syncLanguage(currentLang);

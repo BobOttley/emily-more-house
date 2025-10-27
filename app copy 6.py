@@ -327,32 +327,17 @@ def fetch_family_context(family_id: str) -> Optional[Dict[str, Any]]:
     sql = """
     SELECT
       id AS family_id,
-      first_name,
-      family_surname,
-      parent_name,
-      parent_email,
-      contact_number,
-      age_group,
-      entry_year,
-      gender,
-      current_school,
-      
-      -- Academic interests (boolean columns)
-      sciences, mathematics, english, languages, humanities, business,
-      drama, music, art, creative_writing, sport, leadership,
-      community_service, outdoor_education,
-      
-      -- Priorities (boolean columns)
-      academic_excellence, pastoral_care, university_preparation,
-      personal_development, career_guidance, extracurricular_opportunities,
-      debating, small_classes, london_location, values_based, university_prep,
-      
-      -- Additional info
-      how_heard, additional_info,
-      country, language
-      
+      COALESCE(child_first_name, child_name)  AS child_first_name,
+      COALESCE(child_last_name, '')           AS child_last_name,
+      COALESCE(year_group, entry_year, '')    AS year_group,
+      COALESCE(boarding_status, '')           AS boarding_status,
+      COALESCE(main_interests, '')            AS main_interests,
+      COALESCE(parent_name, contact_name, '') AS parent_name,
+      COALESCE(parent_email, contact_email, '') AS parent_email,
+      COALESCE(country, '')                   AS country,
+      COALESCE(language_pref, 'en')           AS language_pref
     FROM public.inquiries
-    WHERE id = %s AND (school_id = 2 OR school = 'more-house')
+    WHERE id = %s
     LIMIT 1;
     """
     try:
@@ -364,62 +349,20 @@ def fetch_family_context(family_id: str) -> Optional[Dict[str, Any]]:
                     return None
                 cols = [d.name for d in cur.description]
                 data = dict(zip(cols, row))
-                
-                first_name = (data.get('first_name') or '').strip()
-                family_surname_full = (data.get('family_surname') or '').strip()
-                surname_only = family_surname_full.replace('the ', '').replace('The ', '').replace(' Family', '').replace(' family', '').strip()
-                child_name = f"{first_name} {surname_only}".strip() if first_name and surname_only else first_name or surname_only or None
-                
-                # Build lists of interests from boolean columns
-                interests = []
-                if data.get('sciences'): interests.append('sciences')
-                if data.get('mathematics'): interests.append('mathematics')
-                if data.get('english'): interests.append('English')
-                if data.get('languages'): interests.append('languages')
-                if data.get('humanities'): interests.append('humanities')
-                if data.get('business'): interests.append('business')
-                if data.get('drama'): interests.append('drama')
-                if data.get('music'): interests.append('music')
-                if data.get('art'): interests.append('art')
-                if data.get('creative_writing'): interests.append('creative writing')
-                if data.get('sport'): interests.append('sport')
-                if data.get('leadership'): interests.append('leadership')
-                if data.get('community_service'): interests.append('community service')
-                if data.get('outdoor_education'): interests.append('outdoor education')
-                
-                # Build priorities list
-                priorities = []
-                if data.get('academic_excellence'): priorities.append('academic excellence')
-                if data.get('pastoral_care'): priorities.append('pastoral care')
-                if data.get('university_preparation') or data.get('university_prep'): priorities.append('university preparation')
-                if data.get('personal_development'): priorities.append('personal development')
-                if data.get('career_guidance'): priorities.append('career guidance')
-                if data.get('extracurricular_opportunities'): priorities.append('extracurricular opportunities')
-                if data.get('debating'): priorities.append('debating')
-                if data.get('small_classes'): priorities.append('small classes')
-                if data.get('london_location'): priorities.append('London location')
-                if data.get('values_based'): priorities.append('values-based education')
-                
+                child_name = " ".join(filter(None, [
+                    safe_trim(data.get("child_first_name")),
+                    safe_trim(data.get("child_last_name"))
+                ])).strip()
                 summary = {
                     "family_id": data.get("family_id"),
-                    "child_name": child_name,
-                    "first_name": first_name,
-                    "family_surname": family_surname_full,
-                    "surname_only": surname_only,
-                    "year_group": data.get("age_group"),  # More House uses age_group
-                    "entry_year": data.get("entry_year"),
+                    "child_name": child_name or None,
+                    "year_group": safe_trim(data.get("year_group")),
+                    "boarding_status": safe_trim(data.get("boarding_status")),
+                    "interests": safe_trim(data.get("main_interests")),
+                    "country": safe_trim(data.get("country")),
+                    "language_pref": (data.get("language_pref") or "en")[:5],
                     "parent_name": data.get("parent_name"),
                     "parent_email": data.get("parent_email"),
-                    "contact_number": data.get("contact_number"),
-                    "gender": data.get("gender"),
-                    "current_school": data.get("current_school"),
-                    "country": data.get("country"),
-                    "language_pref": (data.get("language") or "en")[:5],
-                    "interests": ", ".join(interests) if interests else "",
-                    "interests_list": interests,
-                    "priorities": priorities,
-                    "how_heard": data.get("how_heard"),
-                    "additional_info": data.get("additional_info"),
                 }
                 return summary
     except Exception as e:
@@ -1311,6 +1254,37 @@ def create_realtime_session():
                 "tools": [
                     {
                         "type": "function",
+                        "name": "send_email",
+                        "description": "Send an email to More House School admissions team. When a parent wants to book a tour, request information, or make an enquiry, you MUST first collect their full name, email address, and phone number, then call this function. Always CC the parent on the email.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "parent_name": {
+                                    "type": "string",
+                                    "description": "Full name of the parent/guardian"
+                                },
+                                "parent_email": {
+                                    "type": "string",
+                                    "description": "Email address of the parent - they will be CC'd on the email"
+                                },
+                                "parent_phone": {
+                                    "type": "string",
+                                    "description": "Phone number of the parent for follow-up"
+                                },
+                                "subject": {
+                                    "type": "string",
+                                    "description": "Email subject line (e.g., 'Tour Booking Request')"
+                                },
+                                "body": {
+                                    "type": "string",
+                                    "description": "Email body content - include what the parent is requesting"
+                                }
+                            },
+                            "required": ["parent_name", "parent_email", "parent_phone", "subject", "body"]
+                        }
+                    },
+                    {
+                        "type": "function",
                         "name": "kb_search",
                         "description": "Search school knowledge base with conversation context",
                         "parameters": {
@@ -1319,33 +1293,6 @@ def create_realtime_session():
                                 "query": {"type": "string", "description": "The search query string"}
                             },
                             "required": ["query"]
-                        }
-                    },
-                    {
-                        "type": "function",
-                        "name": "send_email",
-                        "description": "Send an email to the admissions team on behalf of the parent (e.g., to request a tour, ask a question, or book an appointment). Use this when parents ask you to contact admissions, send a message, or arrange something.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "subject": {
-                                    "type": "string", 
-                                    "description": "Email subject line (e.g., 'Tour Booking Request')"
-                                },
-                                "body": {
-                                    "type": "string",
-                                    "description": "The message body to send to admissions"
-                                },
-                                "parent_email": {
-                                    "type": "string",
-                                    "description": "Parent's email address (optional, if provided)"
-                                },
-                                "parent_name": {
-                                    "type": "string",
-                                    "description": "Parent's name (optional, if provided)"
-                                }
-                            },
-                            "required": ["subject", "body"]
                         }
                     },
                     {
