@@ -192,6 +192,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   let currentLanguage = languageSelector.value;
 
+  // Generate unique session ID for conversation tracking
+  let sessionId = 'sess_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+
   const UI_TEXT = {
     en: { welcome: "Hi there! Ask me anything about More House School.", placeholder: "Type your question…", enquire: "Enquire now" },
     fr: { welcome: "Bonjour ! Posez-moi vos questions sur More House School.", placeholder: "Tapez votre question…", enquire: "Faire une demande" },
@@ -300,10 +303,14 @@ document.addEventListener("DOMContentLoaded", () => {
     welcomeEl.style.display = "none";
     clearButtons();
 
-    fetch("/ask", {
+    fetch("/ask-with-tools", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question: cleanedQ, language: currentLanguage })
+      body: JSON.stringify({
+        question: cleanedQ,
+        language: currentLanguage,
+        session_id: sessionId
+      })
     })
     .then(r => r.json())
     .then(data => {
