@@ -1,588 +1,1101 @@
-// /static/realtime-voice-handsfree.js
-// Ã¢Å“â€¦ MORE HOUSE SCHOOL VERSION - Full feature parity with Cheltenham College
-(function () {
-  // DOM
-  const chatbox   = document.getElementById('penai-chatbox');
-  const toggleBtn = document.getElementById('penai-toggle');
+// More House Emily - Voice Interface (Complete Fixed Version)
+// With proper tool handling and contact collection tracking
 
-  const consent   = document.getElementById('voiceConsent');
-  const agree     = document.getElementById('agreeVoice');
-  const startBtn  = document.getElementById('startVoice');
-  const cancelBtn = document.getElementById('cancelVoice');
-
-  const headerLangSel = document.getElementById('language-selector');
-  const consentLangSel= document.getElementById('vc-lang');
-
-  const startHeaderBtn= document.getElementById('start-button');
-  const pauseBtn      = document.getElementById('pause-button');
-  const endBtn        = document.getElementById('end-button');
-  const aiAudio       = document.getElementById('aiAudio');
-  const indicator     = document.getElementById('voiceIndicator');
-
-  // State
-  let pc = null;           // RTCPeerConnection
-  let dc = null;           // DataChannel
-  let micStream = null;    // MediaStream
-  let started = false;
-  let isPaused = false;
+(function() {
+  // ============================================================================
+  // Configuration
+  // ============================================================================
+  const familyId = new URLSearchParams(window.location.search).get('family_id') || localStorage.getItem('emily_family_id');
+  const DEBUG = true; // Enable detailed logging for troubleshooting
+  
+  // ============================================================================
+  // UI Elements
+  // ============================================================================
+  let btnMic, btnEndCall, statusDiv, transcriptDiv, responseDiv;
+  let debugDiv, volumeBar, contactForm;
+  
+  // ============================================================================
+  // Voice Session State
+  // ============================================================================
+  let pc = null;
+  let dc = null;
+  let micStream = null;
   let sessionId = null;
-  let familyId = null;
-  let currentLang = headerLangSel?.value || 'en';
-
-  // === Fallback watchdog ===
-  let fallbackTimer = null;
-  const FALLBACK_TIMEOUT_MS = 3000; // 3s
-
-  function resetFallbackTimer() {
-    if (fallbackTimer) clearTimeout(fallbackTimer);
-    fallbackTimer = setTimeout(() => {
-      console.warn("âš ï¸ No response from Emily, sending fallback.");
-      playFallbackMessage("Sorry, I didn't catch that â€” could you repeat the question?");
-    }, FALLBACK_TIMEOUT_MS);
-  }
-
-  function cancelFallbackTimer() {
-    if (fallbackTimer) {
-      clearTimeout(fallbackTimer);
-      fallbackTimer = null;
-    }
-  }
-
-  function playFallbackMessage(msg) {
-    // Show in chat (if you have addMessage helper)
-    if (typeof addMessage === "function") addMessage("PEN.ai", msg);
-
-    // Speak it (force TTS via response.create)
-    sendEvent({
-      type: 'response.create',
-      response: { instructions: msg }
-    });
-  }
-
-  // ============================================================================
-  // ðŸ‡¬ðŸ‡§ Language â†’ Voice Mapping
-  // ============================================================================
+  let sessionActive = false;
+  let isListening = false;
+  let lastTranscript = '';
+  let currentLanguage = localStorage.getItem('emily_language') || 'en';
+  
+  // Contact collection state
+  let collectingContact = false;
+  let contactDetails = {
+    parent_name: '',
+    parent_email: '',
+    parent_phone: '',
+    child_name: '',
+    year_group: ''
+  };
+  
+  // Voice configuration by language
   const voiceByLang = {
-    en: 'shimmer',  // British RP accent
-    fr: 'alloy',    // French
-    es: 'verse',    // Spanish
-    de: 'luna',     // German
-    zh: 'alloy',    // Chinese
-    ar: 'luna',     // Arabic
-    it: 'verse',    // Italian
-    ru: 'alloy'     // Russian
+    'en': 'shimmer',    // British female voice
+    'zh': 'alloy',      // Better for Chinese
+    'cn': 'alloy',
+    'chinese': 'alloy',
+    'mandarin': 'alloy'
   };
-
-  // Localisation for consent
-  const i18n = {
-    en: { title:'Enable Emily (voice)', desc:'To chat by voice, we need one-time permission to use your microphone and play audio responses.', agree:'I agree to voice processing for this session.', cancel:'Not now', start:'Start conversation' },
-    fr: { title:'Activer Emily (voix)', desc:'Pour discuter Ã  la voix, nous avons besoin d\'une autorisation unique pour utiliser votre microphone et lire les rÃ©ponses audio.', agree:'J\'accepte le traitement vocal pour cette session.', cancel:'Pas maintenant', start:'Commencer la conversation' },
-    es: { title:'Activar Emily (voz)', desc:'Para hablar por voz, necesitamos permiso Ãºnico para usar tu micrÃ³fono y reproducir respuestas de audio.', agree:'Acepto el procesamiento de voz para esta sesiÃ³n.', cancel:'Ahora no', start:'Iniciar conversaciÃ³n' },
-    de: { title:'Emily (Sprache) aktivieren', desc:'FÃ¼r die Sprachfunktion benÃ¶tigen wir einmalige Berechtigung fÃ¼r Ihr Mikrofon und die Audiowiedergabe.', agree:'Ich stimme der Sprachverarbeitung fÃ¼r diese Sitzung zu.', cancel:'Nicht jetzt', start:'Konversation starten' },
-    zh: { title:'å¯ç”¨ Emilyï¼ˆè¯­éŸ³ï¼‰', desc:'è¦è¿›è¡Œè¯­éŸ³èŠå¤©ï¼Œæˆ‘ä»¬éœ€è¦ä¸€æ¬¡æ€§æŽˆæƒä½¿ç”¨æ‚¨çš„éº¦å…‹é£Žå¹¶æ’­æ”¾éŸ³é¢‘å›žå¤ã€‚', agree:'æˆ‘åŒæ„åœ¨æœ¬æ¬¡ä¼šè¯ä¸­è¿›è¡Œè¯­éŸ³å¤„ç†ã€‚', cancel:'æš‚ä¸', start:'å¼€å§‹å¯¹è¯' },
-    ar: { title:'ØªÙØ¹ÙŠÙ„ Ø¥ÙŠÙ…ÙŠÙ„ÙŠ (ØµÙˆØª)', desc:'Ù„Ù„Ø¯Ø±Ø¯Ø´Ø© Ø¨Ø§Ù„ØµÙˆØªØŒ Ù†Ø­ØªØ§Ø¬ Ø¥Ù„Ù‰ Ø¥Ø°Ù† Ù„Ù…Ø±Ø© ÙˆØ§Ø­Ø¯Ø© Ù„Ø§Ø³ØªØ®Ø¯Ø§Ù… Ø§Ù„Ù…ÙŠÙƒØ±ÙˆÙÙˆÙ† ÙˆØªØ´ØºÙŠÙ„ Ø§Ù„Ø±Ø¯ÙˆØ¯ Ø§Ù„ØµÙˆØªÙŠØ©.', agree:'Ø£ÙˆØ§ÙÙ‚ Ø¹Ù„Ù‰ Ù…Ø¹Ø§Ù„Ø¬Ø© Ø§Ù„ØµÙˆØª Ù„Ù‡Ø°Ù‡ Ø§Ù„Ø¬Ù„Ø³Ø©.', cancel:'Ù„ÙŠØ³ Ø§Ù„Ø¢Ù†', start:'Ø¨Ø¯Ø¡ Ø§Ù„Ù…Ø­Ø§Ø¯Ø«Ø©' },
-    it: { title:'Abilita Emily (voce)', desc:'Per parlare con la voce, serve un\'autorizzazione una tantum per usare il microfono e riprodurre risposte audio.', agree:'Accetto l\'elaborazione vocale per questa sessione.', cancel:'Non ora', start:'Avvia conversazione' },
-    ru: { title:'Ð’ÐºÐ»ÑŽÑ‡Ð¸Ñ‚ÑŒ Emily (Ð³Ð¾Ð»Ð¾Ñ)', desc:'Ð§Ñ‚Ð¾Ð±Ñ‹ Ð¾Ð±Ñ‰Ð°Ñ‚ÑŒÑÑ Ð³Ð¾Ð»Ð¾ÑÐ¾Ð¼, Ð½Ð°Ð¼ Ð½ÑƒÐ¶Ð½Ð¾ Ñ€Ð°Ð·Ð¾Ð²Ð¾Ðµ Ñ€Ð°Ð·Ñ€ÐµÑˆÐµÐ½Ð¸Ðµ Ð½Ð° Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ð½Ð¸Ðµ Ð²Ð°ÑˆÐµÐ³Ð¾ Ð¼Ð¸ÐºÑ€Ð¾Ñ„Ð¾Ð½Ð° Ð¸ Ð²Ð¾ÑÐ¿Ñ€Ð¾Ð¸Ð·Ð²ÐµÐ´ÐµÐ½Ð¸Ðµ Ð°ÑƒÐ´Ð¸Ð¾Ð¾Ñ‚Ð²ÐµÑ‚Ð¾Ð².', agree:'Ð¯ ÑÐ¾Ð³Ð»Ð°ÑÐµÐ½ Ð½Ð° Ð¾Ð±Ñ€Ð°Ð±Ð¾Ñ‚ÐºÑƒ Ð³Ð¾Ð»Ð¾ÑÐ° Ð² ÑÑ‚Ð¾Ð¼ ÑÐµÐ°Ð½ÑÐµ.', cancel:'ÐÐµ ÑÐµÐ¹Ñ‡Ð°Ñ', start:'ÐÐ°Ñ‡Ð°Ñ‚ÑŒ Ñ€Ð°Ð·Ð³Ð¾Ð²Ð¾Ñ€' }
-  };
-
-  // Localise consent UI
-  const vcTitle = document.getElementById('vc-title');
-  const vcDesc  = document.getElementById('vc-desc');
-  const vcAgree = document.getElementById('vc-agree');
-
-  function applyConsentLocale(lang) {
-    const t = i18n[lang] || i18n.en;
-    if (vcTitle) vcTitle.textContent = t.title;
-    if (vcDesc) vcDesc.textContent  = t.desc;
-    if (vcAgree) vcAgree.textContent = t.agree;
-    if (cancelBtn) cancelBtn.textContent = t.cancel;
-    if (startBtn) startBtn.textContent  = t.start;
-  }
-
-  function syncLanguage(lang) {
-    currentLang = lang;
-    if (headerLangSel && headerLangSel.value !== lang) headerLangSel.value = lang;
-    if (consentLangSel && consentLangSel.value !== lang) consentLangSel.value = lang;
-    applyConsentLocale(lang);
-  }
-
-  headerLangSel?.addEventListener('change', e => syncLanguage(e.target.value));
-  consentLangSel?.addEventListener('change', e => syncLanguage(e.target.value));
-
-  // Status indicator
-  function showIndicator(stateText) {
-    if (!indicator) return;
-    indicator.textContent = stateText || 'Ready';
-    indicator.classList.remove('hidden');
-  }
-  function hideIndicator() { indicator?.classList.add('hidden'); }
-
-  function updateUIForStart() {
-    started = true; isPaused = false;
-    startHeaderBtn?.classList.add('hidden');
-    pauseBtn?.classList.remove('hidden');
-    endBtn?.classList.remove('hidden');
-    if (pauseBtn) pauseBtn.textContent = 'Pause';
-  }
-
-  function updateUIForEnd() {
-    started = false; isPaused = false;
-    startHeaderBtn?.classList.remove('hidden');
-    pauseBtn?.classList.add('hidden');
-    endBtn?.classList.add('hidden');
-    showIndicator('Ready');
-  }
-
-  function maybeShowConsent() {
-    if (started) return;
-    if (consent) {
-      syncLanguage(currentLang);
-      consent.style.display = 'flex';
+  
+  // ============================================================================
+  // Tool Execution State
+  // ============================================================================
+  let pendingTools = {};
+  let toolExecutionInProgress = false;
+  
+  // ============================================================================
+  // UI Creation and Management
+  // ============================================================================
+  function createVoiceUI() {
+    const container = document.createElement('div');
+    container.id = 'emily-voice-widget';
+    container.innerHTML = `
+      <div class="voice-header">
+        <img src="/static/more-house-logo.png" alt="More House" class="school-logo" onerror="this.style.display='none'">
+        <h3>Talk to Emily</h3>
+      </div>
+      
+      <div class="voice-status" id="voice-status">
+        <span class="status-dot"></span>
+        <span class="status-text">Ready to chat</span>
+      </div>
+      
+      <div class="voice-controls">
+        <button id="btn-mic" class="btn-voice btn-mic">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+            <path d="M12 1C10.34 1 9 2.34 9 4V12C9 13.66 10.34 15 12 15C13.66 15 15 13.66 15 12V4C15 2.34 13.66 1 12 1Z" stroke="currentColor" stroke-width="2"/>
+            <path d="M19 10V12C19 15.86 15.86 19 12 19C8.14 19 5 15.86 5 12V10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <path d="M12 19V23M8 23H16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <span>Start Call</span>
+        </button>
+        
+        <button id="btn-end" class="btn-voice btn-end" style="display: none;">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+            <path d="M9 9L15 15M15 9L9 15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <span>End Call</span>
+        </button>
+      </div>
+      
+      <div class="voice-volume" id="voice-volume" style="display: none;">
+        <div class="volume-bar">
+          <div class="volume-level" id="volume-level"></div>
+        </div>
+      </div>
+      
+      <div class="voice-transcript" id="voice-transcript" style="display: none;">
+        <div class="transcript-label">You said:</div>
+        <div class="transcript-text" id="transcript-text">...</div>
+      </div>
+      
+      <div class="voice-response" id="voice-response" style="display: none;">
+        <div class="response-label">Emily:</div>
+        <div class="response-text" id="response-text">...</div>
+      </div>
+      
+      <div class="contact-form" id="contact-form" style="display: none;">
+        <div class="form-label">Contact Details Needed</div>
+        <input type="text" id="cf-name" placeholder="Your full name" />
+        <input type="email" id="cf-email" placeholder="Your email address" />
+        <input type="tel" id="cf-phone" placeholder="Your phone number" />
+        <input type="text" id="cf-child" placeholder="Your daughter's name" />
+        <select id="cf-year">
+          <option value="">Select year group</option>
+          <option value="Reception">Reception</option>
+          <option value="Year 1">Year 1</option>
+          <option value="Year 2">Year 2</option>
+          <option value="Year 3">Year 3</option>
+          <option value="Year 4">Year 4</option>
+          <option value="Year 5">Year 5</option>
+          <option value="Year 6">Year 6</option>
+          <option value="Year 7">Year 7</option>
+          <option value="Year 8">Year 8</option>
+          <option value="Year 9">Year 9</option>
+          <option value="Year 10">Year 10</option>
+          <option value="Year 11">Year 11</option>
+          <option value="Sixth Form">Sixth Form</option>
+        </select>
+        <button id="cf-submit" class="btn-submit">Send Tour Request</button>
+      </div>
+      
+      <div class="voice-debug" id="voice-debug" style="display: ${DEBUG ? 'block' : 'none'};">
+        <div class="debug-label">Debug Log:</div>
+        <div class="debug-content" id="debug-content"></div>
+      </div>
+      
+      <audio id="ai-audio" autoplay style="display: none;"></audio>
+    `;
+    
+    document.body.appendChild(container);
+    
+    // Get references
+    btnMic = document.getElementById('btn-mic');
+    btnEndCall = document.getElementById('btn-end');
+    statusDiv = document.getElementById('voice-status');
+    transcriptDiv = document.getElementById('voice-transcript');
+    responseDiv = document.getElementById('voice-response');
+    debugDiv = document.getElementById('debug-content');
+    volumeBar = document.getElementById('voice-volume');
+    contactForm = document.getElementById('contact-form');
+    
+    // Attach event listeners
+    btnMic.addEventListener('click', startVoiceCall);
+    btnEndCall.addEventListener('click', endVoiceCall);
+    
+    // Contact form submit
+    const submitBtn = document.getElementById('cf-submit');
+    if (submitBtn) {
+      submitBtn.addEventListener('click', submitContactForm);
+    }
+    
+    // Add styles
+    addVoiceStyles();
+    
+    logDebug('🎤 Voice UI initialized');
+    if (familyId) {
+      logDebug(`👨‍👩‍👧 Family ID: ${familyId}`);
     }
   }
-
-  const observer = new MutationObserver(() => {
-    if (chatbox?.classList.contains('open')) maybeShowConsent();
-  });
-  if (chatbox) observer.observe(chatbox, { attributes:true, attributeFilter:['class'] });
-
-  toggleBtn?.addEventListener('click', () => {
-    setTimeout(() => {
-      if (chatbox?.classList.contains('open')) maybeShowConsent();
-    }, 50);
-  });
-
-  // Consent interactions
-  agree?.addEventListener('change', () => { startBtn.disabled = !agree.checked; });
-  cancelBtn?.addEventListener('click', () => { consent.style.display = 'none'; });
-
-  startHeaderBtn?.addEventListener('click', () => {
-    if (!chatbox?.classList.contains('open')) chatbox.classList.add('open');
-    if (consent) {
-      agree.checked = false;
-      startBtn.disabled = true;
-      syncLanguage(currentLang);
-      consent.style.display = 'flex';
-    }
-  });
-
-  startBtn?.addEventListener('click', async () => {
-    startBtn.disabled = true;
-    showIndicator('Connectingâ€¦');
-    try {
-      await startVoiceSession();
-      consent.style.display = 'none';
-      updateUIForStart();
-      showIndicator('Listeningâ€¦');
-    } catch (err) {
-      console.error('Voice start error:', err);
-      startBtn.disabled = false;
-      showIndicator('Error');
-      alert('Could not start voice. Please check mic permissions and try again.');
-    }
-  });
-
-  pauseBtn?.addEventListener('click', () => {
-    if (!micStream) return;
-    const track = micStream.getAudioTracks()[0];
-    if (!track) return;
-    
-    // Toggle pause state
-    isPaused = !isPaused;
-    
-    // Pause/resume microphone
-    track.enabled = !isPaused;
-    
-    // Pause/resume Emily's audio output
-    if (aiAudio) {
-      if (isPaused) {
-        aiAudio.pause();
-        aiAudio.muted = true;
-      } else {
-        aiAudio.muted = false;
-        aiAudio.play().catch(()=>{});
+  
+  function addVoiceStyles() {
+    const style = document.createElement('style');
+    style.textContent = `
+      #emily-voice-widget {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        width: 380px;
+        background: white;
+        border-radius: 16px;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.15);
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        z-index: 10000;
+        overflow: hidden;
       }
-    }
+      
+      .voice-header {
+        background: linear-gradient(135deg, #091825 0%, #1a2f45 100%);
+        color: white;
+        padding: 20px;
+        text-align: center;
+      }
+      
+      .school-logo {
+        height: 40px;
+        margin-bottom: 10px;
+      }
+      
+      .voice-header h3 {
+        margin: 0;
+        font-size: 18px;
+        font-weight: 600;
+      }
+      
+      .voice-status {
+        display: flex;
+        align-items: center;
+        padding: 12px 20px;
+        background: #f8f9fa;
+        border-bottom: 1px solid #e9ecef;
+      }
+      
+      .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #28a745;
+        margin-right: 10px;
+        animation: pulse 2s infinite;
+      }
+      
+      .status-dot.active {
+        background: #FF9F1C;
+        animation: pulse 1s infinite;
+      }
+      
+      .status-dot.error {
+        background: #dc3545;
+        animation: none;
+      }
+      
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+      }
+      
+      .voice-controls {
+        padding: 20px;
+        display: flex;
+        justify-content: center;
+        gap: 10px;
+      }
+      
+      .btn-voice {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 24px;
+        border: none;
+        border-radius: 8px;
+        font-size: 15px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s ease;
+      }
+      
+      .btn-mic {
+        background: #FF9F1C;
+        color: white;
+      }
+      
+      .btn-mic:hover {
+        background: #e68a00;
+        transform: translateY(-2px);
+      }
+      
+      .btn-mic.active {
+        background: #28a745;
+      }
+      
+      .btn-end {
+        background: #dc3545;
+        color: white;
+      }
+      
+      .btn-end:hover {
+        background: #c82333;
+      }
+      
+      .voice-volume {
+        padding: 0 20px 15px;
+      }
+      
+      .volume-bar {
+        height: 6px;
+        background: #e9ecef;
+        border-radius: 3px;
+        overflow: hidden;
+      }
+      
+      .volume-level {
+        height: 100%;
+        background: #FF9F1C;
+        width: 0%;
+        transition: width 0.1s ease;
+      }
+      
+      .voice-transcript,
+      .voice-response {
+        padding: 15px 20px;
+        border-top: 1px solid #e9ecef;
+      }
+      
+      .transcript-label,
+      .response-label,
+      .form-label {
+        font-size: 12px;
+        font-weight: 600;
+        color: #6c757d;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      
+      .transcript-text,
+      .response-text {
+        font-size: 14px;
+        line-height: 1.5;
+        color: #212529;
+        max-height: 100px;
+        overflow-y: auto;
+      }
+      
+      .contact-form {
+        padding: 20px;
+        background: #f8f9fa;
+        border-top: 2px solid #FF9F1C;
+      }
+      
+      .contact-form input,
+      .contact-form select {
+        width: 100%;
+        padding: 10px;
+        margin-bottom: 10px;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        font-size: 14px;
+      }
+      
+      .contact-form input:focus,
+      .contact-form select:focus {
+        outline: none;
+        border-color: #FF9F1C;
+      }
+      
+      .btn-submit {
+        width: 100%;
+        padding: 12px;
+        background: #FF9F1C;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        font-size: 15px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.3s;
+      }
+      
+      .btn-submit:hover {
+        background: #e68a00;
+      }
+      
+      .voice-debug {
+        padding: 15px 20px;
+        background: #f8f9fa;
+        border-top: 1px solid #e9ecef;
+      }
+      
+      .debug-label {
+        font-size: 11px;
+        font-weight: 600;
+        color: #6c757d;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      
+      .debug-content {
+        font-family: 'Courier New', monospace;
+        font-size: 11px;
+        color: #495057;
+        max-height: 150px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      
+      .email-confirmation {
+        padding: 15px;
+        margin: 10px 20px;
+        background: #d4edda;
+        border: 1px solid #c3e6cb;
+        border-radius: 8px;
+        color: #155724;
+        animation: slideDown 0.3s ease;
+      }
+      
+      @keyframes slideDown {
+        from {
+          opacity: 0;
+          transform: translateY(-10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+  
+  // ============================================================================
+  // Voice Session Management
+  // ============================================================================
+  async function startVoiceCall() {
+    if (sessionActive) return;
     
-    // Update UI
-    pauseBtn.textContent = isPaused ? 'Resume' : 'Pause';
-    showIndicator(isPaused ? 'Paused' : 'Listeningâ€¦');
-  });
-
-  endBtn?.addEventListener('click', () => {
-    teardownSession();
-    updateUIForEnd();
-  });
-
-  document.addEventListener('visibilitychange', () => {
-    if (!micStream) return;
-    const enable = document.visibilityState === 'visible';
-    micStream.getAudioTracks().forEach(t => t.enabled = enable && !isPaused);
-  });
-  window.addEventListener('beforeunload', teardownSession);
-
-  // === Voice session with FULL TOOL SUPPORT ===
-  async function startVoiceSession() {
-    const sessRes = await fetch('/realtime/session', {
+    try {
+      logDebug('🎬 Starting voice call...');
+      updateStatus('Connecting...', 'active');
+      
+      // Update UI
+      btnMic.style.display = 'none';
+      btnEndCall.style.display = 'flex';
+      volumeBar.style.display = 'block';
+      transcriptDiv.style.display = 'block';
+      responseDiv.style.display = 'block';
+      
+      // Create session
+      await createRealtimeSession();
+      
+      // Setup WebRTC
+      await setupWebRTC();
+      
+      sessionActive = true;
+      isListening = true;
+      updateStatus('Connected - Listening', 'active');
+      
+      logDebug('✅ Voice call started successfully');
+      
+    } catch (error) {
+      console.error('Failed to start voice call:', error);
+      logDebug(`❌ Error: ${error.message}`);
+      updateStatus('Connection failed', 'error');
+      resetUI();
+    }
+  }
+  
+  async function createRealtimeSession() {
+    logDebug('📞 Creating realtime session...');
+    
+    const response = await fetch('/realtime/session', {
       method: 'POST',
-      headers: {'Content-Type':'application/json'},
+      headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
         model: 'gpt-4o-realtime-preview',
-        voice: voiceByLang[currentLang] || 'shimmer',
-        language: currentLang,
-        // âœ… CRITICAL: Register all tools with OpenAI
-        tools: [
-          {
-            type: 'function',
-            name: 'send_email',
-            description: 'Send an email to the admissions team on behalf of the family. Use this when parents want to book a tour, request information, or contact admissions.',
-            parameters: {
-              type: 'object',
-              properties: {
-                subject: { type: 'string', description: 'Email subject line' },
-                body: { type: 'string', description: 'Email body content' },
-                family_id: { type: 'string', description: 'Family ID from context' }
-              },
-              required: ['subject', 'body']
-            }
-          },
-          {
-            type: 'function',
-            name: 'get_family_context',
-            description: 'Retrieve personalized family information including child name, interests, and preferences from the database',
-            parameters: {
-              type: 'object',
-              properties: {
-                family_id: { type: 'string', description: 'Family ID to look up' }
-              }
-            }
-          },
-          {
-            type: 'function',
-            name: 'get_open_days',
-            description: 'Get upcoming open day dates and information for More House School',
-            parameters: {
-              type: 'object',
-              properties: {}
-            }
-          },
-          {
-            type: 'function',
-            name: 'kb_search',
-            description: 'Search the More House School knowledge base for detailed information about curriculum, facilities, fees, admissions process, etc.',
-            parameters: {
-              type: 'object',
-              properties: {
-                query: { type: 'string', description: 'Search query about the school' }
-              },
-              required: ['query']
-            }
-          },
-          {
-            type: 'function',
-            name: 'book_tour',
-            description: 'Initiate tour booking process by notifying admissions team',
-            parameters: {
-              type: 'object',
-              properties: {
-                family_id: { type: 'string', description: 'Family ID' },
-                preferred_date: { type: 'string', description: 'Preferred tour date if mentioned' }
-              }
-            }
-          }
-        ]
+        voice: voiceByLang[currentLanguage] || 'shimmer',
+        language: currentLanguage,
+        family_id: familyId
       })
     });
-    if (!sessRes.ok) throw new Error('Failed to create realtime session: ' + (await sessRes.text().catch(()=>'')));
-    const sess = await sessRes.json();
-    sessionId = sess.session_id;
-
-    const token =
-      sess.token ||
-      (sess.session && sess.session.client_secret && (sess.session.client_secret.value || sess.session.client_secret)) ||
-      (sess.client_secret && (sess.client_secret.value || sess.client_secret)) ||
-      sess.value;
-    if (!token) throw new Error('No ephemeral token returned');
-
-    pc = new RTCPeerConnection();
-
-    pc.ontrack = (e) => {
-      if (aiAudio) {
-        aiAudio.srcObject = e.streams[0];
-        aiAudio.play().catch(()=>{});
+    
+    if (!response.ok) {
+      throw new Error(`Session creation failed: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    sessionId = data.session_id;
+    
+    // Extract token
+    const token = data.token || 
+                  (data.client_secret && data.client_secret.value) ||
+                  data.client_secret;
+    
+    if (!token) {
+      throw new Error('No ephemeral token received');
+    }
+    
+    // Store for WebRTC setup
+    window.realtimeToken = token;
+    
+    logDebug(`✅ Session created: ${sessionId}`);
+    logDebug(`🔑 Token received: ${token.substring(0, 20)}...`);
+  }
+  
+  async function setupWebRTC() {
+    logDebug('🌐 Setting up WebRTC connection...');
+    
+    // Create peer connection
+    pc = new RTCPeerConnection({
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+    });
+    
+    // Handle incoming audio
+    pc.ontrack = (event) => {
+      logDebug('🔊 Received audio track');
+      const audio = document.getElementById('ai-audio');
+      if (audio && event.streams[0]) {
+        audio.srcObject = event.streams[0];
+        audio.play().catch(e => console.error('Audio play error:', e));
       }
-      cancelFallbackTimer(); // got audio, cancel watchdog
     };
-
+    
+    // Create data channel for events
     dc = pc.createDataChannel('oai-events');
+    
     dc.onopen = () => {
+      logDebug('📡 Data channel opened');
+      
+      // Send initial greeting trigger
       sendEvent({
-        type: 'response.create',
-        response: {
-          instructions: `Please greet the user in their selected language (${currentLang}). Keep replies concise and helpful, and continue in this language unless they ask to switch.`
+        type: 'conversation.item.create',
+        item: {
+          type: 'message',
+          role: 'user',
+          content: [{
+            type: 'input_text',
+            text: 'Hello'
+          }]
         }
       });
-      resetFallbackTimer(); // start watchdog after greeting request
+      
+      // Request response
+      sendEvent({
+        type: 'response.create'
+      });
     };
-    dc.onmessage = onEventMessage;
-
+    
+    dc.onmessage = handleRealtimeEvent;
+    dc.onerror = (error) => {
+      logDebug(`❌ Data channel error: ${error}`);
+    };
+    
+    // Get user microphone
     micStream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation:true, noiseSuppression:true, autoGainControl:true },
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      },
       video: false
     });
-    micStream.getTracks().forEach(t => pc.addTrack(t, micStream));
-
+    
+    // Add microphone to peer connection
+    micStream.getTracks().forEach(track => {
+      pc.addTrack(track, micStream);
+    });
+    
+    // Monitor microphone volume
+    monitorMicrophoneVolume();
+    
+    // Create offer
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-
-    const sdpRes = await fetch('https://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview', {
+    
+    logDebug('📤 Sending SDP offer to OpenAI...');
+    
+    // Send offer to OpenAI
+    const sdpResponse = await fetch('https://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${token}`,
+        'Authorization': `Bearer ${window.realtimeToken}`,
         'Content-Type': 'application/sdp'
       },
       body: offer.sdp
     });
-    if (!sdpRes.ok) throw new Error('Realtime SDP error: ' + (await sdpRes.text().catch(()=>'')));
-
-    const answer = { type:'answer', sdp: await sdpRes.text() };
+    
+    if (!sdpResponse.ok) {
+      throw new Error(`SDP exchange failed: ${sdpResponse.status}`);
+    }
+    
+    const answer = {
+      type: 'answer',
+      sdp: await sdpResponse.text()
+    };
+    
     await pc.setRemoteDescription(answer);
+    
+    logDebug('✅ WebRTC connection established');
   }
-
-  function sendEvent(obj){
-    if (dc && dc.readyState === 'open') {
-      dc.send(JSON.stringify(obj));
-    }
-  }
-
-  function onEventMessage(evt){
-    let msg; try{ msg = JSON.parse(evt.data); } catch { return; }
-    switch (msg.type) {
-      case 'input_audio_buffer.speech_started':
-        showIndicator('Listeningâ€¦'); break;
-      case 'input_audio_buffer.speech_stopped':
-        showIndicator('Thinkingâ€¦');
-        resetFallbackTimer(); // user finished â†’ wait for reply
-        break;
-      case 'response.audio.started':
-        showIndicator('Speakingâ€¦');
-        cancelFallbackTimer(); // reply began
-        break;
-      case 'response.audio.done':
-        showIndicator('Listeningâ€¦');
-        cancelFallbackTimer(); // reply finished
-        break;
-      case 'response.function_call_arguments.done':
-        // Tool call initiated by Emily
-        executeTool(msg.call_id, msg.name, msg.arguments);
-        break;
-      default: break;
-    }
-  }
-
+  
   // ============================================================================
-  // ðŸ”§ TOOL EXECUTION - Handle all Emily's function calls
+  // Event Handling
   // ============================================================================
-  async function executeTool(callId, functionName, argsJson) {
-    console.log(`ðŸ”§ Executing tool: ${functionName}`, argsJson);
-    
-    let args = {};
+  function handleRealtimeEvent(event) {
     try {
-      args = JSON.parse(argsJson || '{}');
-    } catch (e) {
-      console.error('Failed to parse tool arguments:', e);
-    }
-    
-    let result = null;
-    let error = null;
-    
-    try {
-      if (functionName === 'send_email') {
-        // âœ… CRITICAL: Send email via admissions team
-        const response = await fetch('/realtime/tool/send_email', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({
-            subject: args.subject,
-            body: args.body,
-            family_id: args.family_id || familyId
-          })
-        });
-        
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-        
-        const data = await response.json();
-        result = {
-          ok: true,
-          success: true,
-          message: "I've sent your message to our admissions team. They'll be in touch shortly!"
-        };
-        
-        console.log('âœ… Email sent successfully');
-        
-      } else if (functionName === 'get_family_context') {
-        // Call the backend endpoint
-        const response = await fetch('/realtime/tool/get_family_context', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ family_id: args.family_id || familyId })
-        });
-        
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-        
-        const data = await response.json();
-        result = data;
-        console.log('âœ… Family context fetched:', data);
-        
-      } else if (functionName === 'get_open_days') {
-        // Call open days endpoint
-        const response = await fetch('/realtime/tool/get_open_days', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({})
-        });
-        
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-        
-        const data = await response.json();
-        result = data;
-        console.log('âœ… Open days fetched:', data);
-        
-      } else if (functionName === 'kb_search') {
-        // Knowledge base search
-        const response = await fetch('/ask', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            question: args.query,
-            language: currentLang,
-            family_id: familyId,
-            session_id: sessionId
-          })
-        });
-        
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-        
-        const data = await response.json();
-        result = { answer: data.answer, url: data.url };
-        console.log('âœ… Knowledge search completed');
-        
-      } else if (functionName === 'book_tour') {
-        // Book tour - return confirmation
-        result = {
-          ok: true,
-          message: "I'll arrange for our admissions team to contact you about booking a tour."
-        };
-        console.log('âœ… Tour booking requested');
-        
-      } else {
-        error = `Unknown tool: ${functionName}`;
+      const data = JSON.parse(event.data);
+      
+      // Log all events except audio deltas
+      if (DEBUG && data.type !== 'response.audio.delta') {
+        logDebug(`📨 Event: ${data.type}`);
       }
       
-    } catch (e) {
-      console.error(`Tool execution error:`, e);
-      error = e.message;
-    }
-
-    // Send the result back to Emily
-    sendEvent({
-      type: 'conversation.item.create',
-      item: {
-        type: 'function_call_output',
-        call_id: callId,
-        output: error ? JSON.stringify({ error }) : JSON.stringify(result)
+      switch(data.type) {
+        case 'conversation.item.created':
+          if (data.item && data.item.role === 'user') {
+            handleUserTranscript(data.item);
+          }
+          break;
+          
+        case 'response.text.delta':
+          handleResponseDelta(data);
+          break;
+          
+        case 'response.text.done':
+          handleResponseComplete(data);
+          break;
+          
+        case 'response.function_call_arguments.start':
+          handleToolCallStart(data);
+          break;
+          
+        case 'response.function_call_arguments.delta':
+          handleToolCallDelta(data);
+          break;
+          
+        case 'response.function_call_arguments.done':
+          handleToolCallComplete(data);
+          break;
+          
+        case 'response.done':
+          if (data.response && data.response.output) {
+            handleFinalResponse(data.response.output);
+          }
+          break;
+          
+        case 'error':
+          handleError(data);
+          break;
       }
-    });
-
-    // Tell Emily to generate a response with the tool result
-    sendEvent({
-      type: 'response.create'
-    });
+    } catch (error) {
+      console.error('Error handling realtime event:', error);
+      logDebug(`❌ Event handling error: ${error.message}`);
+    }
   }
-
-  function teardownSession() {
-    try { micStream?.getTracks().forEach(t => t.stop()); } catch {}
-    try { pc?.close(); } catch {}
-    micStream = null; pc = null; dc = null; sessionId = null;
-    cancelFallbackTimer();
-  }
-
-  // ============================================================================
-  // PROACTIVE GREETING - Extract family_id from parent page & auto-start
-  // ============================================================================
   
-  // Extract family_id from URL first
-  const urlParams = new URLSearchParams(window.location.search);
-  familyId = urlParams.get('family_id') || urlParams.get('id') || null;
-
-  // CRITICAL: Try to get family_id from parent page's meta tag (Emily is in iframe)
-  if (!familyId) {
-    try {
-      const parentDoc = window.parent.document;
-      const meta = parentDoc.querySelector('meta[name="inquiry-id"]');
-      if (meta) {
-        familyId = meta.getAttribute('content');
-        console.log('Family ID from parent meta tag:', familyId);
-      }
-    } catch (e) {
-      console.log('Cannot access parent document (cross-origin)');
-    }
-  }
-
-  // Try localStorage as fallback (if Emily is on same domain)
-  if (!familyId) {
-    try {
-      const stored = localStorage.getItem('enquiryData');
-      if (stored) {
-        const data = JSON.parse(stored);
-        familyId = data.id;
-        console.log('Family ID from localStorage:', familyId);
-      }
-    } catch (e) {
-      console.error('Failed to parse enquiryData:', e);
-    }
-  }
-
-  if (familyId) {
-    console.log('Emily voice initialised with family_id:', familyId);
-    
-    // PROACTIVE GREETING: Show consent modal after 10 seconds
-    let greetingTimer = setTimeout(() => {
-      if (!started && consent && consent.style.display !== 'flex') {
-        console.log('Showing voice consent modal for proactive greeting');
-        consent.style.display = 'flex';
+  function handleUserTranscript(item) {
+    if (item.content && item.content[0]) {
+      const text = item.content[0].transcript || item.content[0].text || '';
+      if (text && text !== 'Hello') { // Ignore our trigger message
+        lastTranscript = text;
+        updateTranscript(text);
+        logDebug(`🎤 User: "${text}"`);
         
-        // Personalise the consent message
-        if (vcDesc) {
-          vcDesc.textContent = 'Welcome! I am Emily, and I can help answer your questions about More House School. To chat by voice, I need permission to use your microphone and play audio responses.';
+        // Check for contact information in transcript
+        extractContactFromTranscript(text);
+        
+        // Check if this is a tour request
+        checkForTourRequest(text);
+      }
+    }
+  }
+  
+  function extractContactFromTranscript(text) {
+    // Extract email
+    const emailMatch = text.match(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/);
+    if (emailMatch && !contactDetails.parent_email) {
+      contactDetails.parent_email = emailMatch[0];
+      logDebug(`📧 Extracted email: ${contactDetails.parent_email}`);
+    }
+    
+    // Extract phone (UK patterns)
+    const phoneMatch = text.match(/\b(?:07\d{9}|01\d{9}|02\d{9}|\+447\d{9})\b/);
+    if (phoneMatch && !contactDetails.parent_phone) {
+      contactDetails.parent_phone = phoneMatch[0];
+      logDebug(`📞 Extracted phone: ${contactDetails.parent_phone}`);
+    }
+    
+    // Extract name (if they say "my name is..." or "I'm...")
+    const nameMatch = text.match(/(?:my name is|i'm|i am|this is)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/i);
+    if (nameMatch && !contactDetails.parent_name) {
+      contactDetails.parent_name = nameMatch[1];
+      logDebug(`👤 Extracted name: ${contactDetails.parent_name}`);
+    }
+  }
+  
+  function checkForTourRequest(text) {
+    const tourKeywords = ['tour', 'visit', 'book', 'see the school', 'admissions', 'apply'];
+    if (tourKeywords.some(keyword => text.toLowerCase().includes(keyword))) {
+      collectingContact = true;
+      logDebug('🏫 Tour request detected - collecting contact details');
+      
+      // Show contact form if we don't have all details
+      if (!contactDetails.parent_email || !contactDetails.parent_phone) {
+        showContactForm();
+      }
+    }
+  }
+  
+  function handleResponseDelta(data) {
+    if (data.delta) {
+      const currentText = document.getElementById('response-text').textContent;
+      document.getElementById('response-text').textContent = currentText + data.delta;
+    }
+  }
+  
+  function handleResponseComplete(data) {
+    if (data.text) {
+      document.getElementById('response-text').textContent = data.text;
+      logDebug(`🤖 Emily: "${data.text.substring(0, 100)}..."`);
+      
+      // Check if Emily is asking for contact details
+      if (data.text.toLowerCase().includes('email') || 
+          data.text.toLowerCase().includes('phone') ||
+          data.text.toLowerCase().includes('contact')) {
+        collectingContact = true;
+      }
+    }
+  }
+  
+  function handleFinalResponse(output) {
+    if (output && output[0]) {
+      if (output[0].type === 'message' && output[0].content) {
+        const content = output[0].content[0];
+        if (content && content.text) {
+          document.getElementById('response-text').textContent = content.text;
         }
       }
-    }, 10000); // 10 seconds
-    
-    // Cancel timer if user manually opens chatbox
-    if (toggleBtn) {
-      toggleBtn.addEventListener('click', () => {
-        clearTimeout(greetingTimer);
-      }, { once: true });
     }
-    if (startHeaderBtn) {
-      startHeaderBtn.addEventListener('click', () => {
-        clearTimeout(greetingTimer);
-      }, { once: true });
-    }
-    
-  } else {
-    console.log('Emily voice initialised without family_id');
   }
-
-  syncLanguage(currentLang);
+  
+  // ============================================================================
+  // Tool Execution
+  // ============================================================================
+  function handleToolCallStart(data) {
+    logDebug(`🔧 Tool call starting: ${data.name || 'unknown'}`);
+    
+    if (data.call_id && data.name) {
+      pendingTools[data.call_id] = {
+        name: data.name,
+        arguments: ''
+      };
+      toolExecutionInProgress = true;
+    }
+  }
+  
+  function handleToolCallDelta(data) {
+    if (data.call_id && data.delta && pendingTools[data.call_id]) {
+      pendingTools[data.call_id].arguments += data.delta;
+    }
+  }
+  
+  async function handleToolCallComplete(data) {
+    if (!data.call_id || !pendingTools[data.call_id]) return;
+    
+    const tool = pendingTools[data.call_id];
+    logDebug(`🔧 Executing tool: ${tool.name}`);
+    
+    try {
+      let args = {};
+      if (tool.arguments) {
+        args = JSON.parse(tool.arguments);
+      }
+      
+      // Add session context
+      args.family_id = familyId;
+      args.session_id = sessionId;
+      
+      // If this is send_email, capture the contact details
+      if (tool.name === 'send_email') {
+        if (args.parent_email) contactDetails.parent_email = args.parent_email;
+        if (args.parent_phone) contactDetails.parent_phone = args.parent_phone;
+        if (args.parent_name) contactDetails.parent_name = args.parent_name;
+        
+        logDebug(`📧 Sending email with collected details:`);
+        logDebug(`   Name: ${args.parent_name}`);
+        logDebug(`   Email: ${args.parent_email}`);
+        logDebug(`   Phone: ${args.parent_phone}`);
+      }
+      
+      logDebug(`📤 Tool args: ${JSON.stringify(args)}`);
+      
+      // Execute the tool
+      let result = await executeToolCall(tool.name, args);
+      
+      // Send result back to the model
+      sendEvent({
+        type: 'conversation.item.create',
+        item: {
+          type: 'function_call_output',
+          call_id: data.call_id,
+          output: JSON.stringify(result)
+        }
+      });
+      
+      // Clean up
+      delete pendingTools[data.call_id];
+      toolExecutionInProgress = false;
+      
+      logDebug(`✅ Tool ${tool.name} executed successfully`);
+      
+      // Show email confirmation in UI if it was an email tool
+      if (tool.name === 'send_email' && result.success) {
+        showEmailConfirmation(args);
+        hideContactForm();
+      }
+      
+    } catch (error) {
+      console.error(`Tool execution failed:`, error);
+      logDebug(`❌ Tool error: ${error.message}`);
+      
+      // Send error back to model
+      sendEvent({
+        type: 'conversation.item.create',
+        item: {
+          type: 'function_call_output',
+          call_id: data.call_id,
+          output: JSON.stringify({
+            error: error.message,
+            success: false
+          })
+        }
+      });
+      
+      delete pendingTools[data.call_id];
+      toolExecutionInProgress = false;
+    }
+  }
+  
+  async function executeToolCall(toolName, args) {
+    logDebug(`🚀 Calling tool endpoint: /realtime/tool/${toolName}`);
+    
+    const response = await fetch(`/realtime/tool/${toolName}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(args)
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Tool call failed (${response.status}): ${errorText}`);
+    }
+    
+    const result = await response.json();
+    logDebug(`📥 Tool response: ${JSON.stringify(result)}`);
+    
+    return result;
+  }
+  
+  // ============================================================================
+  // Contact Form Management
+  // ============================================================================
+  function showContactForm() {
+    const form = document.getElementById('contact-form');
+    if (form) {
+      form.style.display = 'block';
+      logDebug('📝 Showing contact form');
+    }
+  }
+  
+  function hideContactForm() {
+    const form = document.getElementById('contact-form');
+    if (form) {
+      form.style.display = 'none';
+    }
+  }
+  
+  async function submitContactForm() {
+    // Gather form data
+    contactDetails.parent_name = document.getElementById('cf-name').value;
+    contactDetails.parent_email = document.getElementById('cf-email').value;
+    contactDetails.parent_phone = document.getElementById('cf-phone').value;
+    contactDetails.child_name = document.getElementById('cf-child').value;
+    contactDetails.year_group = document.getElementById('cf-year').value;
+    
+    if (!contactDetails.parent_name || !contactDetails.parent_email || !contactDetails.parent_phone) {
+      alert('Please fill in all required fields (name, email, phone)');
+      return;
+    }
+    
+    logDebug('📤 Submitting contact form...');
+    
+    // Send via tool endpoint
+    try {
+      const result = await executeToolCall('send_email', {
+        parent_name: contactDetails.parent_name,
+        parent_email: contactDetails.parent_email,
+        parent_phone: contactDetails.parent_phone,
+        subject: `Tour Request - ${contactDetails.child_name || 'More House School'}`,
+        body: `Tour request from ${contactDetails.parent_name} for ${contactDetails.child_name || 'their daughter'} (${contactDetails.year_group || 'Year group not specified'})`,
+        family_id: familyId,
+        session_id: sessionId
+      });
+      
+      if (result.success) {
+        showEmailConfirmation(contactDetails);
+        hideContactForm();
+        
+        // Tell Emily we've sent the email
+        sendEvent({
+          type: 'conversation.item.create',
+          item: {
+            type: 'message',
+            role: 'assistant',
+            content: [{
+              type: 'text',
+              text: `Perfect! I've sent your tour request to our admissions team. They'll contact you at ${contactDetails.parent_email} within 24 hours.`
+            }]
+          }
+        });
+      }
+    } catch (error) {
+      console.error('Failed to submit contact form:', error);
+      alert('Sorry, there was an error sending your request. Please try again.');
+    }
+  }
+  
+  function showEmailConfirmation(emailData) {
+    const confirmDiv = document.createElement('div');
+    confirmDiv.className = 'email-confirmation';
+    confirmDiv.innerHTML = `
+      <strong>✅ Email Sent Successfully!</strong><br>
+      To: ${emailData.parent_email || 'Admissions'}<br>
+      Subject: ${emailData.subject || 'Tour Enquiry'}<br>
+      <small>The admissions team will contact you within 24 hours.</small>
+    `;
+    
+    responseDiv.appendChild(confirmDiv);
+    
+    // Store contact details for future use
+    if (emailData.parent_email) {
+      localStorage.setItem('emily_parent_details', JSON.stringify({
+        name: emailData.parent_name,
+        email: emailData.parent_email,
+        phone: emailData.parent_phone
+      }));
+    }
+    
+    // Auto-remove after 10 seconds
+    setTimeout(() => {
+      confirmDiv.remove();
+    }, 10000);
+  }
+  
+  // ============================================================================
+  // Utility Functions
+  // ============================================================================
+  function sendEvent(event) {
+    if (dc && dc.readyState === 'open') {
+      const eventStr = JSON.stringify(event);
+      dc.send(eventStr);
+      if (DEBUG && event.type !== 'response.create') {
+        logDebug(`📤 Sent: ${event.type}`);
+      }
+    }
+  }
+  
+  function updateStatus(text, state = 'normal') {
+    const statusText = statusDiv.querySelector('.status-text');
+    const statusDot = statusDiv.querySelector('.status-dot');
+    
+    statusText.textContent = text;
+    statusDot.className = 'status-dot';
+    
+    if (state === 'active') {
+      statusDot.classList.add('active');
+    } else if (state === 'error') {
+      statusDot.classList.add('error');
+    }
+  }
+  
+  function updateTranscript(text) {
+    document.getElementById('transcript-text').textContent = text;
+  }
+  
+  function handleError(error) {
+    console.error('Realtime error:', error);
+    logDebug(`❌ Error: ${JSON.stringify(error)}`);
+    updateStatus('Error occurred', 'error');
+  }
+  
+  function logDebug(message) {
+    if (DEBUG && debugDiv) {
+      const timestamp = new Date().toLocaleTimeString();
+      debugDiv.textContent += `[${timestamp}] ${message}\n`;
+      debugDiv.scrollTop = debugDiv.scrollHeight;
+    }
+    console.log(`[Emily Voice] ${message}`);
+  }
+  
+  function monitorMicrophoneVolume() {
+    if (!micStream) return;
+    
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const analyser = audioContext.createAnalyser();
+    const microphone = audioContext.createMediaStreamSource(micStream);
+    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+    
+    microphone.connect(analyser);
+    analyser.fftSize = 256;
+    
+    function updateVolume() {
+      if (!sessionActive) return;
+      
+      analyser.getByteFrequencyData(dataArray);
+      const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
+      const percentage = Math.min(100, (average / 128) * 100);
+      
+      const volumeLevel = document.getElementById('volume-level');
+      if (volumeLevel) {
+        volumeLevel.style.width = `${percentage}%`;
+      }
+      
+      requestAnimationFrame(updateVolume);
+    }
+    
+    updateVolume();
+  }
+  
+  async function endVoiceCall() {
+    logDebug('📴 Ending voice call...');
+    
+    sessionActive = false;
+    isListening = false;
+    
+    // Save conversation summary if we collected contact
+    if (sessionId && (contactDetails.parent_email || contactDetails.parent_phone)) {
+      try {
+        await fetch('/api/conversation/end', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            session_id: sessionId,
+            contact_collected: true,
+            contact_details: contactDetails
+          })
+        });
+        logDebug('✅ Conversation summary saved');
+      } catch (e) {
+        console.error('Failed to save conversation summary:', e);
+      }
+    }
+    
+    // Close connections
+    if (dc) {
+      dc.close();
+      dc = null;
+    }
+    
+    if (pc) {
+      pc.close();
+      pc = null;
+    }
+    
+    if (micStream) {
+      micStream.getTracks().forEach(track => track.stop());
+      micStream = null;
+    }
+    
+    // Reset UI
+    resetUI();
+    updateStatus('Call ended', 'normal');
+    
+    logDebug('✅ Voice call ended');
+  }
+  
+  function resetUI() {
+    btnMic.style.display = 'flex';
+    btnEndCall.style.display = 'none';
+    volumeBar.style.display = 'none';
+    transcriptDiv.style.display = 'none';
+    responseDiv.style.display = 'none';
+    contactForm.style.display = 'none';
+    
+    document.getElementById('transcript-text').textContent = '';
+    document.getElementById('response-text').textContent = '';
+    
+    // Clear contact form
+    document.getElementById('cf-name').value = '';
+    document.getElementById('cf-email').value = '';
+    document.getElementById('cf-phone').value = '';
+    document.getElementById('cf-child').value = '';
+    document.getElementById('cf-year').value = '';
+  }
+  
+  // ============================================================================
+  // Initialization
+  // ============================================================================
+  function init() {
+    // Load saved contact details if available
+    try {
+      const saved = localStorage.getItem('emily_parent_details');
+      if (saved) {
+        const details = JSON.parse(saved);
+        contactDetails.parent_name = details.name || '';
+        contactDetails.parent_email = details.email || '';
+        contactDetails.parent_phone = details.phone || '';
+        logDebug('📋 Loaded saved contact details');
+      }
+    } catch (e) {
+      console.error('Failed to load saved details:', e);
+    }
+    
+    // Wait for DOM ready
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', createVoiceUI);
+    } else {
+      createVoiceUI();
+    }
+  }
+  
+  // Start initialization
+  init();
+  
 })();

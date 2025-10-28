@@ -1,377 +1,917 @@
-/* ────────────────────────────────────────────────────────────
-   PEN.ai Chatbot – self-injecting backup (bubble + consent UI)
-   - Injects minimal HTML + styles if missing
-   - Fetch shim to hit chatbot origin across services
-   - Preserves existing behaviour and labels
-───────────────────────────────────────────────────────────── */
+// More House Emily - Text Chat Interface (Complete Fixed Version)
+// With contact collection and database logging
 
-console.log("✅ PEN.ai self-injecting script.js loaded");
+console.log("✅ More House Emily chatbot loaded");
 
-// Generate a unique session ID for this chat session
-const sessionId = 'chat-' + Math.random().toString(36).substr(2, 9) + '-' + Date.now();
-console.log("📝 Session ID:", sessionId);
+// ==================== Configuration ====================
+const CHATBOT_ORIGIN = window.EMILY_CHATBOT_ORIGIN || "";
 
-// === 0) Config: set your chatbot backend origin here (or window.PENAI_CHATBOT_ORIGIN) ===
-const CHATBOT_ORIGIN = window.PENAI_CHATBOT_ORIGIN || "https://emily-more-house.onrender.com";
+// Extract and persist family_id
+let FAMILY_ID = new URLSearchParams(window.location.search).get('family_id');
 
-// === 1) Fetch shim: route same-origin paths to chatbot backend when site + bot are separate ===
-(function () {
-  const origFetch = window.fetch.bind(window);
-  window.fetch = (input, init) => {
-    if (typeof input === "string" && input.startsWith("/")) input = CHATBOT_ORIGIN + input;
-    return origFetch(input, init);
-  };
-})();
-
-// === 2) Inject minimal styles once (only if not already present) ===
-(function ensureStyles() {
-  if (document.getElementById("penai-styles")) return;
-  const css = `
-  :root { --primary-color:#091825; --accent-color:#FF9F1C; --text-color:#fff; --chat-bg:#f9f9f9; --border-color:#e0e0e0; --button-bg:#f0f0f0; --button-fg:#444; }
-  #penai-toggle{position:fixed;bottom:20px;right:20px;width:60px;height:60px;border-radius:50%;background:var(--accent-color);color:#fff;font-size:28px;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.2);z-index:100000;}
-  #penai-toggle:hover{background:#e98f14;}
-  #penai-chatbox{display:none;flex-direction:column;position:fixed;bottom:90px;right:20px;width:360px;max-height:600px;background:#fff;border:1px solid var(--border-color);border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,.15);z-index:100000;overflow:hidden;}
-  #penai-chatbox.open{display:flex;animation:penai-slideUp .25s ease-out;}
-  @keyframes penai-slideUp{from{transform:translateY(16px);opacity:0}to{transform:translateY(0);opacity:1}}
-  #penai-header{display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--primary-color);color:#fff;}
-  #penai-header h2{margin:0;font-size:16px;flex:1;}
-  #penai-close{background:none;border:none;color:#fff;font-size:18px;cursor:pointer;line-height:1;padding:4px 6px;border-radius:6px;}
-  #penai-close:hover{background-color:rgba(255,255,255,.12);}
-  #language-selector{font-size:12px;padding:3px 6px;border-radius:4px;border:1px solid #ccc;background:#fff;color:#000;}
-  .penai-ctl{padding:6px 10px;background:var(--button-bg);color:var(--button-fg);font-size:12px;border-radius:6px;border:1px solid #ccc;cursor:pointer;}
-  .penai-ctl.hidden{display:none!important;}
-  #welcome-message{padding:10px 15px;background:#f9f9f9;color:#091825;font-size:14px;}
-  #chat-history{flex:1;padding:15px 15px 100px;overflow-y:auto;background:var(--chat-bg);border-top:1px solid var(--border-color);border-bottom:1px solid var(--border-color);scroll-behavior:smooth;}
-  .message{margin-bottom:12px;padding:10px;font-size:14px;line-height:1.4;max-width:85%;word-wrap:break-word;border:1px solid #e0e0e0;border-radius:8px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.05);}
-  .message.user{text-align:right;align-self:flex-end;color:#333;}
-  .message.bot{text-align:left;align-self:flex-start;color:#091825;}
-  .message.bot p::before{content:"Emily: ";font-weight:700;}
-  .chat-link{display:block;margin-top:5px;text-decoration:underline;font-size:14px;color:#0056b3;}
-  #button-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:10px;background:#f1f1f1;border-top:1px solid #ddd;border-bottom:1px solid #ddd;}
-  .quick-reply{padding:6px 8px;background:var(--button-bg);color:var(--button-fg);font-size:12px;border-radius:20px;border:1px solid #ccc;cursor:pointer;}
-  .quick-reply:hover{background:#e0e0e0;}
-  #penai-input-container{display:flex;padding:10px;background:#fff;}
-  #question-input{flex:1;padding:8px;border:1px solid var(--border-color);border-radius:5px;font-size:14px;}
-  #send-button{margin-left:8px;padding:8px 12px;background:var(--primary-color);color:#fff;border:none;border-radius:5px;font-size:14px;cursor:pointer;}
-  #send-button:hover{background-color:#0c2235;}
-  #thinking-text{padding:10px 15px;display:none;font-style:italic;color:#777;}
-  #thinking-text::after{content:"";display:inline-block;width:1em;text-align:left;animation:penai-dots 1.2s steps(3,end) infinite;}
-  @keyframes penai-dots{0%{content:""}33%{content:"."}66%{content:".."}100%{content:"..."}}
-  .voice-indicator.hidden{display:none!important;}
-  `;
-  const style = document.createElement("style");
-  style.id = "penai-styles";
-  style.textContent = css;
-  document.head.appendChild(style);
-})();
-
-// === NEW: Helper function to send resize messages to parent window ===
-function sendResizeMessage(width, height) {
+if (FAMILY_ID) {
   try {
-    if (window.parent && window.parent !== window) {
-      console.log(`📏 Sending resize message: ${width}x${height}`);
-      window.parent.postMessage({
-        type: 'penai:resize',
-        w: parseInt(width),
-        h: parseInt(height)
-      }, '*');
+    localStorage.setItem('emily_family_id', FAMILY_ID);
+    console.log('✅ Family ID saved:', FAMILY_ID);
+  } catch (e) {
+    console.error('Failed to save family_id:', e);
+  }
+}
+
+if (!FAMILY_ID) {
+  try {
+    FAMILY_ID = localStorage.getItem('emily_family_id');
+    if (FAMILY_ID) {
+      console.log('✅ Family ID from storage:', FAMILY_ID);
     }
   } catch (e) {
-    console.log('Could not send resize message:', e);
+    console.error('Failed to load family_id:', e);
   }
 }
 
-// === 3) Inject required DOM if missing ===
-function ensureEl(tag, attrs = {}, parent = document.body) {
-  const el = document.createElement(tag);
-  Object.entries(attrs).forEach(([k, v]) => {
-    if (k === "text") el.textContent = v;
-    else if (k === "html") el.innerHTML = v;
-    else el.setAttribute(k, v);
-  });
-  parent.appendChild(el);
-  return el;
-}
+// ==================== State Management ====================
+let chatHistory = [];
+let sessionId = null;
+let isProcessing = false;
+let contactDetails = {
+  parent_name: '',
+  parent_email: '',
+  parent_phone: '',
+  child_name: '',
+  year_group: ''
+};
+let awaitingContactDetails = false;
+let pendingRequest = '';
 
-function ensureChatSkeleton() {
-  // Toggle button
-  if (!document.getElementById("penai-toggle")) {
-    ensureEl("div", { id: "penai-toggle", "aria-label": "Open chat", text: "💬" });
-  }
-
-  // Chatbox container + header + body
-  if (!document.getElementById("penai-chatbox")) {
-    const box = ensureEl("div", { id: "penai-chatbox", "aria-live": "polite" });
-
-    const header = ensureEl("div", { id: "penai-header" }, box);
-    ensureEl("h2", { html: "Chat with Emily" }, header);
-
-    // Language selector
-    const lang = ensureEl("select", { id: "language-selector", "aria-label": "Language" }, header);
-    lang.innerHTML = `
-      <option value="en">🇬🇧 English</option>
-      <option value="fr">🇫🇷 Français</option>
-      <option value="es">🇪🇸 Español</option>
-      <option value="de">🇩🇪 Deutsch</option>
-      <option value="zh">🇨🇳 中文</option>
-      <option value="ar">🇸🇦 العربية</option>
-      <option value="it">🇮🇹 Italiano</option>
-      <option value="ru">🇷🇺 Русский</option>
-    `;
-
-    // Controls
-    ensureEl("button", { id: "start-button", class: "penai-ctl", text: "Start conversation" }, header);
-    ensureEl("button", { id: "pause-button", class: "penai-ctl hidden", type: "button", text: "Pause" }, header);
-    ensureEl("button", { id: "end-button", class: "penai-ctl hidden", type: "button", text: "End chat" }, header);
-    ensureEl("button", { id: "penai-close", type: "button", "aria-label": "Close chat", html: "✕" }, header);
-
-    // Body
-    ensureEl("div", { id: "welcome-message" }, box);
-    ensureEl("div", { id: "chat-history" }, box);
-    ensureEl("div", { id: "thinking-text", text: "Thinking" }, box);
-    ensureEl("div", { id: "button-grid" }, box);
-
-    // Input row
-    const inputRow = ensureEl("div", { id: "penai-input-container" }, box);
-    ensureEl("input", { id: "question-input", type: "text", placeholder: "Ask a question…" }, inputRow);
-    ensureEl("button", { id: "send-button", text: "Send" }, inputRow);
-  }
-
-  // Voice consent modal + indicator + audio (so realtime-voice-handsfree.js won't crash)
-  if (!document.getElementById("voiceConsent")) {
-    const modal = ensureEl("div", { id: "voiceConsent", style: "position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:999999;" });
-    const panel = ensureEl("div", { style: "background:#fff;padding:20px;border-radius:12px;max-width:460px;width:92%;box-shadow:0 8px 30px rgba(0,0,0,.2);" }, modal);
-    const row = ensureEl("div", { style: "display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;" }, panel);
-    ensureEl("h3", { id: "vc-title", style: "margin:0", text: "Enable Emily (voice)" }, row);
-    const vcSel = ensureEl("select", { id: "vc-lang", style: "font-size:12px;padding:3px 6px;border-radius:4px;border:1px solid #ccc;background:#fff;color:#000;" }, row);
-    vcSel.innerHTML = `
-      <option value="en">🇬🇧 English</option>
-      <option value="fr">🇫🇷 Français</option>
-      <option value="es">🇪🇸 Español</option>
-      <option value="de">🇩🇪 Deutsch</option>
-      <option value="zh">🇨🇳 中文</option>
-      <option value="ar">🇸🇦 العربية</option>
-      <option value="it">🇮🇹 Italiano</option>
-      <option value="ru">🇷🇺 Русский</option>
-    `;
-    ensureEl("p", { id: "vc-desc", text: "To chat by voice, we need one-time permission to use your microphone and play audio responses." }, panel);
-    const lab = ensureEl("label", { style: "display:block;margin:8px 0;" }, panel);
-    ensureEl("input", { id: "agreeVoice", type: "checkbox" }, lab);
-    ensureEl("span", { id: "vc-agree", html: " I agree to voice processing for this session." }, lab);
-    const btns = ensureEl("div", { style: "display:flex;gap:8px;justify-content:flex-end;margin-top:12px;" }, panel);
-    ensureEl("button", { id: "cancelVoice", type: "button", text: "Not now" }, btns);
-    ensureEl("button", { id: "startVoice", type: "button", text: "Start conversation", disabled: "" }, btns);
-  }
-
-  if (!document.getElementById("voiceIndicator")) {
-    ensureEl("div", { id: "voiceIndicator", class: "voice-indicator hidden", style: "position:fixed;right:20px;bottom:700px;background:#fff;border:1px solid #ddd;border-radius:8px;padding:6px 10px;font-size:12px;box-shadow:0 4px 12px rgba(0,0,0,.1);", text: "Ready" });
-  }
-  if (!document.getElementById("aiAudio")) {
-    ensureEl("audio", { id: "aiAudio", autoplay: "", playsinline: "" });
-  }
-}
-
-// === 4) Main app (same behaviour as your existing script) ===
-document.addEventListener("DOMContentLoaded", () => {
-  // Ensure skeleton exists so the rest never crashes
-  ensureChatSkeleton();
-
-  // Cache DOM refs
-  const chatbox          = document.getElementById("penai-chatbox");
-  const toggleBtn        = document.getElementById("penai-toggle");
-  const closeBtn         = document.getElementById("penai-close");
-  const history          = document.getElementById("chat-history");
-  const input            = document.getElementById("question-input");
-  const sendBtn          = document.getElementById("send-button");
-  const thinking         = document.getElementById("thinking-text");
-  const buttonGrid       = document.getElementById("button-grid");
-  const languageSelector = document.getElementById("language-selector");
-  const welcomeEl        = document.getElementById("welcome-message");
-
-  // Safety check
-  if (!chatbox || !toggleBtn || !closeBtn || !history || !input || !sendBtn || !thinking || !buttonGrid || !languageSelector || !welcomeEl) {
-    console.error("🚫 Chatbot elements still missing – aborting.");
-    return;
-  }
-
-  let currentLanguage = languageSelector.value;
-
-  const UI_TEXT = {
-    en: { welcome: "Hi there! Ask me anything about More House School.", placeholder: "Type your question…", enquire: "Enquire now" },
-    fr: { welcome: "Bonjour ! Posez-moi vos questions sur More House School.", placeholder: "Tapez votre question…", enquire: "Faire une demande" },
-    es: { welcome: "¡Hola! Pregúntame lo que quieras sobre More House School.", placeholder: "Escribe tu pregunta…", enquire: "Consultar ahora" },
-    de: { welcome: "Hallo! Fragen Sie mich alles über die More House School.", placeholder: "Geben Sie Ihre Frage ein…", enquire: "Jetzt anfragen" },
-    zh: { welcome: "您好！欢迎咨询 More House School。", placeholder: "请输入问题…", enquire: "现在咨询" }
-  };
-
-  const LABELS = {
-    en: { fees: "Fees", admissions: "Admissions", contact: "Contact", open: "Open Events", enquire: UI_TEXT.en.enquire, prospectus: "Tailored Prospectus" },
-    fr: { fees: "Frais", admissions: "Admissions", contact: "Contact", open: "Portes ouvertes", enquire: UI_TEXT.fr.enquire, prospectus: "Prospectus personnalisé" },
-    es: { fees: "Tasas", admissions: "Admisiones", contact: "Contacto", open: "Jornadas abiertas", enquire: UI_TEXT.es.enquire, prospectus: "Prospecto personal" },
-    de: { fees: "Gebühren", admissions: "Aufnahme", contact: "Kontakt", open: "Tage der offenen Tür", enquire: UI_TEXT.de.enquire, prospectus: "Individuelles Prospekt" },
-    zh: { fees: "学费", admissions: "招生", contact: "联系方式", open: "开放日", enquire: UI_TEXT.zh.enquire, prospectus: "定制版招生简章" }
-  };
-
-  function clearButtons(){ buttonGrid.innerHTML = ""; }
-  function getTranslatedLabel(k){ return LABELS[currentLanguage]?.[k] || k; }
-
-  function createButton(label, query) {
-    const btn = document.createElement("button");
-    btn.className = "quick-reply";
-    btn.innerText = label;
-    btn.onclick = () => sendMessage(query);
-    buttonGrid.appendChild(btn);
-  }
-
-  function showInitialButtons() {
-    clearButtons();
-    ["fees", "admissions", "contact", "open", "enquire", "prospectus"].forEach(key => {
-      createButton(getTranslatedLabel(key), key);
-    });
-  }
-
-  function appendExchange(questionText, answerText, url = null, linkLabel = null) {
-    const exchangeDiv = document.createElement("div");
-    exchangeDiv.className = "exchange";
-
-    const userDiv = document.createElement("div");
-    userDiv.className = "message user";
-    const userP = document.createElement("p");
-
-    const userPrefix = { en:"Me:", fr:"Moi :", de:"Ich:", es:"Yo:", zh:"我：" }[currentLanguage] || "Me:";
-    const cleanedQ = questionText.replace(/^Me:|^Moi\s*:|^Ich:|^Yo:|^我：/, '').trim();
-    userP.textContent = `${userPrefix} ${cleanedQ}`;
-    userDiv.appendChild(userP);
-
-    const botDiv = document.createElement("div");
-    botDiv.className = "message bot";
-    const botP = document.createElement("p");
-    botP.textContent = answerText;
-    botDiv.appendChild(botP);
-
-    if (url && linkLabel) {
-      const a = document.createElement("a");
-      a.href = url; a.target = "_blank"; a.className = "chat-link"; a.textContent = linkLabel;
-      botDiv.appendChild(a);
+// ==================== UI Injection ====================
+(function injectUI() {
+  if (document.getElementById("emily-styles")) return;
+  
+  // Inject styles
+  const styles = document.createElement('style');
+  styles.id = 'emily-styles';
+  styles.textContent = `
+    :root {
+      --mh-primary: #091825;
+      --mh-accent: #FF9F1C;
+      --mh-text: #333;
+      --mh-bg: #f9f9f9;
+      --mh-border: #e0e0e0;
     }
-
-    exchangeDiv.appendChild(userDiv);
-    exchangeDiv.appendChild(botDiv);
-    history.appendChild(exchangeDiv);
-    history.scrollTop = history.scrollHeight;
-  }
-
-  function updateWelcome() {
-    const t = UI_TEXT[currentLanguage] || UI_TEXT.en;
-    welcomeEl.innerText = t.welcome;
-    input.placeholder = t.placeholder;
-  }
-
-  function renderDynamicButtons(queries = [], queryMap = {}) {
-    clearButtons();
-    // Always add Enquire first
-    const t = UI_TEXT[currentLanguage] || UI_TEXT.en;
-    createButton(t.enquire, "enquiry");
-
-    // Add up to 5 contextual
-    let count = 0;
-    for (const key of queries) {
-      if ((key || "").toLowerCase() === "enquiry") continue;
-      const label = queryMap[key] || getTranslatedLabel(key);
-      createButton(label, key);
-      if (++count === 5) break;
+    
+    #emily-toggle {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      width: 70px;
+      height: 70px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--mh-accent) 0%, #e68a00 100%);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+      z-index: 10000;
+      transition: all 0.3s ease;
     }
-
-    // Pad with defaults if fewer than 5
-    if (count < 5) {
-      const defaults = ["fees", "admissions", "open", "contact", "prospectus"];
-      for (const key of defaults) {
-        if (queries.includes(key) || key === "enquiry") continue;
-        createButton(getTranslatedLabel(key), key);
-        if (++count === 5) break;
+    
+    #emily-toggle:hover {
+      transform: scale(1.1);
+      box-shadow: 0 6px 25px rgba(0,0,0,0.3);
+    }
+    
+    #emily-toggle svg {
+      width: 35px;
+      height: 35px;
+      fill: white;
+    }
+    
+    #emily-greeting {
+      position: fixed;
+      bottom: 100px;
+      right: 20px;
+      background: white;
+      padding: 15px 20px;
+      border-radius: 18px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+      max-width: 280px;
+      animation: slideInRight 0.5s ease;
+      z-index: 9999;
+    }
+    
+    @keyframes slideInRight {
+      from {
+        transform: translateX(100px);
+        opacity: 0;
+      }
+      to {
+        transform: translateX(0);
+        opacity: 1;
       }
     }
+    
+    #emily-chatbox {
+      display: none;
+      flex-direction: column;
+      position: fixed;
+      bottom: 100px;
+      right: 20px;
+      width: 400px;
+      height: 650px;
+      background: white;
+      border-radius: 16px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+      z-index: 10001;
+      overflow: hidden;
+    }
+    
+    #emily-chatbox.open {
+      display: flex;
+      animation: slideUp 0.3s ease;
+    }
+    
+    @keyframes slideUp {
+      from {
+        transform: translateY(20px);
+        opacity: 0;
+      }
+      to {
+        transform: translateY(0);
+        opacity: 1;
+      }
+    }
+    
+    #emily-header {
+      background: linear-gradient(135deg, var(--mh-primary) 0%, #1a2f45 100%);
+      color: white;
+      padding: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    
+    #emily-header h2 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 600;
+    }
+    
+    #emily-close {
+      background: rgba(255,255,255,0.2);
+      border: none;
+      color: white;
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.3s;
+      font-size: 18px;
+    }
+    
+    #emily-close:hover {
+      background: rgba(255,255,255,0.3);
+    }
+    
+    #chat-history {
+      flex: 1;
+      padding: 20px;
+      overflow-y: auto;
+      background: var(--mh-bg);
+      scroll-behavior: smooth;
+    }
+    
+    .message {
+      margin-bottom: 15px;
+      animation: fadeIn 0.3s ease;
+    }
+    
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    
+    .message.user {
+      text-align: right;
+    }
+    
+    .message.user .bubble {
+      background: var(--mh-accent);
+      color: white;
+      display: inline-block;
+      padding: 10px 15px;
+      border-radius: 18px 18px 4px 18px;
+      max-width: 80%;
+      word-wrap: break-word;
+    }
+    
+    .message.bot .bubble {
+      background: white;
+      color: var(--mh-text);
+      display: inline-block;
+      padding: 10px 15px;
+      border-radius: 18px 18px 18px 4px;
+      max-width: 80%;
+      word-wrap: break-word;
+      border: 1px solid var(--mh-border);
+    }
+    
+    .message.bot .bubble strong {
+      color: var(--mh-primary);
+    }
+    
+    .contact-form {
+      background: #f0f8ff;
+      padding: 15px;
+      border-radius: 8px;
+      margin-top: 10px;
+      border: 1px solid #FF9F1C;
+    }
+    
+    .contact-form h4 {
+      margin: 0 0 10px 0;
+      color: var(--mh-primary);
+      font-size: 14px;
+    }
+    
+    .contact-form input,
+    .contact-form select {
+      width: 100%;
+      padding: 8px;
+      margin: 5px 0;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    
+    .contact-form input:focus,
+    .contact-form select:focus {
+      outline: none;
+      border-color: var(--mh-accent);
+    }
+    
+    .contact-form button {
+      background: var(--mh-accent);
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 6px;
+      cursor: pointer;
+      margin-top: 10px;
+      font-weight: 600;
+      width: 100%;
+    }
+    
+    .contact-form button:hover {
+      background: #e68a00;
+    }
+    
+    .email-confirmation {
+      background: #d4edda;
+      border: 1px solid #c3e6cb;
+      color: #155724;
+      padding: 12px;
+      border-radius: 8px;
+      margin-top: 10px;
+    }
+    
+    #button-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+      padding: 15px;
+      background: white;
+      border-top: 1px solid var(--mh-border);
+    }
+    
+    .quick-reply {
+      padding: 10px;
+      background: white;
+      color: var(--mh-primary);
+      border: 1px solid var(--mh-border);
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: all 0.2s;
+    }
+    
+    .quick-reply:hover {
+      background: var(--mh-accent);
+      color: white;
+      border-color: var(--mh-accent);
+    }
+    
+    #emily-input-container {
+      display: flex;
+      padding: 15px;
+      background: white;
+      border-top: 1px solid var(--mh-border);
+    }
+    
+    #question-input {
+      flex: 1;
+      padding: 10px 15px;
+      border: 1px solid var(--mh-border);
+      border-radius: 25px;
+      font-size: 14px;
+      outline: none;
+    }
+    
+    #question-input:focus {
+      border-color: var(--mh-accent);
+    }
+    
+    #ask-button {
+      background: var(--mh-accent);
+      color: white;
+      border: none;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      margin-left: 10px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.3s;
+    }
+    
+    #ask-button:hover {
+      background: #e68a00;
+    }
+    
+    #ask-button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    
+    .typing-indicator {
+      display: inline-block;
+      padding: 10px 15px;
+      background: white;
+      border: 1px solid var(--mh-border);
+      border-radius: 18px;
+    }
+    
+    .typing-indicator span {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--mh-primary);
+      margin: 0 2px;
+      animation: typing 1.4s infinite;
+    }
+    
+    .typing-indicator span:nth-child(2) {
+      animation-delay: 0.2s;
+    }
+    
+    .typing-indicator span:nth-child(3) {
+      animation-delay: 0.4s;
+    }
+    
+    @keyframes typing {
+      0%, 60%, 100% {
+        transform: translateY(0);
+        opacity: 0.5;
+      }
+      30% {
+        transform: translateY(-10px);
+        opacity: 1;
+      }
+    }
+    
+    @media (max-width: 480px) {
+      #emily-chatbox {
+        width: 100%;
+        height: 100%;
+        bottom: 0;
+        right: 0;
+        border-radius: 0;
+      }
+    }
+  `;
+  document.head.appendChild(styles);
+  
+  // Inject HTML
+  const chatHTML = `
+    <div id="emily-toggle">
+      <svg viewBox="0 0 24 24">
+        <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/>
+      </svg>
+    </div>
+    
+    <div id="emily-greeting" style="display: none;">
+      <strong>Hello! I'm Emily 👋</strong><br>
+      I'm here to help with any questions about More House School.
+    </div>
+    
+    <div id="emily-chatbox">
+      <div id="emily-header">
+        <h2>Chat with Emily</h2>
+        <button id="emily-close">✕</button>
+      </div>
+      
+      <div id="chat-history"></div>
+      
+      <div id="button-grid">
+        <button class="quick-reply" data-query="Book a tour">Book a Tour</button>
+        <button class="quick-reply" data-query="Admissions process">Admissions</button>
+        <button class="quick-reply" data-query="Fees and scholarships">Fees</button>
+        <button class="quick-reply" data-query="Curriculum">Curriculum</button>
+      </div>
+      
+      <div id="emily-input-container">
+        <input type="text" id="question-input" placeholder="Type your question..." />
+        <button id="ask-button">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
+            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  `;
+  
+  const container = document.createElement('div');
+  container.innerHTML = chatHTML;
+  document.body.appendChild(container);
+})();
+
+// ==================== Initialize Session ====================
+async function initializeSession() {
+  try {
+    // Get or create session ID
+    sessionId = localStorage.getItem('emily_session_id');
+    if (!sessionId) {
+      sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+      localStorage.setItem('emily_session_id', sessionId);
+    }
+    
+    // Load saved contact details if available
+    const savedDetails = localStorage.getItem('emily_parent_details');
+    if (savedDetails) {
+      try {
+        const details = JSON.parse(savedDetails);
+        contactDetails.parent_name = details.name || '';
+        contactDetails.parent_email = details.email || '';
+        contactDetails.parent_phone = details.phone || '';
+        console.log('✅ Loaded saved contact details');
+      } catch (e) {
+        console.error('Failed to parse saved details:', e);
+      }
+    }
+    
+    // Initialize with family context if available
+    if (FAMILY_ID) {
+      const response = await fetch('/api/family/init', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          family_id: FAMILY_ID,
+          session_id: sessionId
+        })
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('✅ Session initialized with family context');
+        
+        // Update contact details from family context
+        if (data.parent_name) contactDetails.parent_name = data.parent_name;
+        if (data.parent_email) contactDetails.parent_email = data.parent_email;
+        if (data.child_name) contactDetails.child_name = data.child_name;
+        if (data.year_group) contactDetails.year_group = data.year_group;
+        
+        // Show personalized greeting if we have family data
+        if (data.parent_name) {
+          showPersonalizedGreeting(data.parent_name);
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Session init error:', e);
   }
+}
 
-  function sendMessage(msgText) {
-    const rawQ = (msgText || input.value).trim();
-    if (!rawQ) return;
+// ==================== Greeting Bubble ====================
+function showPersonalizedGreeting(parentName) {
+  const greeting = document.getElementById('emily-greeting');
+  if (greeting) {
+    greeting.innerHTML = `
+      <strong>Hello ${parentName}! 👋</strong><br>
+      Welcome back! How can I help you today?
+    `;
+    greeting.style.display = 'block';
+    
+    setTimeout(() => {
+      greeting.style.display = 'none';
+    }, 8000);
+  }
+}
 
-    const cleanedQ = rawQ.replace(/^Me:|^Moi\s*:|^Ich:|^Yo:|^我：/, '').trim();
+// Show greeting after delay
+setTimeout(() => {
+  const greeting = document.getElementById('emily-greeting');
+  const chatbox = document.getElementById('emily-chatbox');
+  
+  if (greeting && !chatbox.classList.contains('open')) {
+    // Only show generic greeting if we don't have family data
+    if (!contactDetails.parent_name) {
+      greeting.style.display = 'block';
+      
+      setTimeout(() => {
+        greeting.style.display = 'none';
+      }, 8000);
+    }
+  }
+}, 5000);
 
-    input.value = "";
-    thinking.style.display = "block";
-    welcomeEl.style.display = "none";
-    clearButtons();
-
-    fetch("/ask-with-tools", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ 
-        question: cleanedQ, 
-        language: currentLanguage,
-        session_id: sessionId  // Include session ID for conversation tracking
+// ==================== Chat Functions ====================
+async function sendMessage(question, isUserMessage = true) {
+  if (!question || isProcessing) return;
+  
+  isProcessing = true;
+  const chatHistory = document.getElementById('chat-history');
+  
+  // Add user message
+  if (isUserMessage) {
+    const userMsg = document.createElement('div');
+    userMsg.className = 'message user';
+    userMsg.innerHTML = `<div class="bubble">${escapeHtml(question)}</div>`;
+    chatHistory.appendChild(userMsg);
+  }
+  
+  // Show typing indicator
+  const typingDiv = document.createElement('div');
+  typingDiv.className = 'message bot';
+  typingDiv.innerHTML = `
+    <div class="typing-indicator">
+      <span></span>
+      <span></span>
+      <span></span>
+    </div>
+  `;
+  chatHistory.appendChild(typingDiv);
+  chatHistory.scrollTop = chatHistory.scrollHeight;
+  
+  try {
+    // Check if this is an email/tour request
+    const emailKeywords = ['book', 'tour', 'visit', 'contact', 'email', 'admissions', 'prospectus', 'apply', 'see the school'];
+    const isEmailRequest = emailKeywords.some(keyword => question.toLowerCase().includes(keyword));
+    
+    // If awaiting contact details, handle them
+    if (awaitingContactDetails) {
+      handleContactResponse(question);
+      typingDiv.remove();
+      isProcessing = false;
+      return;
+    }
+    
+    const endpoint = isEmailRequest ? '/ask-with-tools' : '/ask';
+    
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        question: question,
+        family_id: FAMILY_ID,
+        session_id: sessionId,
+        language: 'en'
       })
-    })
-    .then(r => r.json())
-    .then(data => {
-      thinking.style.display = "none";
-      appendExchange(cleanedQ, data.answer, data.url, data.link_label);
-      if (data.queries && data.queries.length) renderDynamicButtons(data.queries, data.query_map);
-      else showInitialButtons();
-    })
-    .catch(err => {
-      thinking.style.display = "none";
-      console.error("❌ Fetch error:", err);
-      appendExchange(cleanedQ, "Something went wrong – please try again.");
-      showInitialButtons();
     });
-  }
-
-  // === FIXED: Toggle / close with resize messages ===
-  toggleBtn.addEventListener("click", () => {
-    chatbox.classList.toggle("open");
-    if (chatbox.classList.contains("open")) {
-      // Chat opened - resize iframe to full size
-      sendResizeMessage(400, 600); // Increased height
-      updateWelcome();
-      showInitialButtons();
-      input.focus();
+    
+    const data = await response.json();
+    
+    // Remove typing indicator
+    typingDiv.remove();
+    
+    // Add bot response
+    const botMsg = document.createElement('div');
+    botMsg.className = 'message bot';
+    
+    if (data.requires_details && (!contactDetails.parent_email || !contactDetails.parent_phone)) {
+      // Need to collect email details
+      awaitingContactDetails = true;
+      pendingRequest = question;
+      
+      botMsg.innerHTML = `
+        <div class="bubble">
+          <strong>Emily:</strong> ${data.answer}
+          <div class="contact-form">
+            <h4>Please provide your contact details:</h4>
+            <input type="text" id="cf-name" placeholder="Your full name" value="${contactDetails.parent_name}" />
+            <input type="email" id="cf-email" placeholder="Your email address" value="${contactDetails.parent_email}" />
+            <input type="tel" id="cf-phone" placeholder="Your phone number" value="${contactDetails.parent_phone}" />
+            <input type="text" id="cf-child" placeholder="Your daughter's name" value="${contactDetails.child_name}" />
+            <select id="cf-year">
+              <option value="">Select year group</option>
+              <option value="Reception">Reception</option>
+              <option value="Year 1">Year 1</option>
+              <option value="Year 2">Year 2</option>
+              <option value="Year 3">Year 3</option>
+              <option value="Year 4">Year 4</option>
+              <option value="Year 5">Year 5</option>
+              <option value="Year 6">Year 6</option>
+              <option value="Year 7">Year 7</option>
+              <option value="Year 8">Year 8</option>
+              <option value="Year 9">Year 9</option>
+              <option value="Year 10">Year 10</option>
+              <option value="Year 11">Year 11</option>
+              <option value="Sixth Form">Sixth Form</option>
+            </select>
+            <button onclick="submitContactDetails()">Send Tour Request</button>
+          </div>
+        </div>
+      `;
+      
+      // Pre-select year group if we have it
+      if (contactDetails.year_group) {
+        setTimeout(() => {
+          const yearSelect = document.getElementById('cf-year');
+          if (yearSelect) yearSelect.value = contactDetails.year_group;
+        }, 100);
+      }
     } else {
-      // Chat closed - resize iframe back to small bubble
-      sendResizeMessage(64, 64);
+      botMsg.innerHTML = `<div class="bubble"><strong>Emily:</strong> ${data.answer}</div>`;
+      
+      // If email was sent successfully, show confirmation
+      if (data.answer.includes('sent') && data.answer.includes('admissions')) {
+        const confirmDiv = document.createElement('div');
+        confirmDiv.className = 'email-confirmation';
+        confirmDiv.innerHTML = `✅ Your request has been sent to the admissions team.`;
+        botMsg.querySelector('.bubble').appendChild(confirmDiv);
+      }
+    }
+    
+    chatHistory.appendChild(botMsg);
+    
+    // Update quick replies if provided
+    if (data.queries && data.queries.length > 0) {
+      updateQuickReplies(data.queries.slice(0, 4));
+    }
+    
+  } catch (error) {
+    console.error('Error sending message:', error);
+    typingDiv.remove();
+    
+    const errorMsg = document.createElement('div');
+    errorMsg.className = 'message bot';
+    errorMsg.innerHTML = `
+      <div class="bubble">
+        <strong>Emily:</strong> I apologize, but I'm having trouble connecting right now. 
+        Please try again or contact us directly at office@morehousemail.org.uk
+      </div>
+    `;
+    chatHistory.appendChild(errorMsg);
+  }
+  
+  chatHistory.scrollTop = chatHistory.scrollHeight;
+  isProcessing = false;
+}
+
+// Handle contact detail collection
+function handleContactResponse(response) {
+  // Try to extract contact info from response
+  const emailMatch = response.match(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/);
+  const phoneMatch = response.match(/\b(?:07\d{9}|01\d{9}|02\d{9}|\+447\d{9})\b/);
+  
+  if (emailMatch) contactDetails.parent_email = emailMatch[0];
+  if (phoneMatch) contactDetails.parent_phone = phoneMatch[0];
+  
+  // If response contains a name pattern
+  const nameMatch = response.match(/(?:my name is|i'm|i am)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/i);
+  if (nameMatch) contactDetails.parent_name = nameMatch[1];
+  
+  // Check if we have enough details now
+  if (contactDetails.parent_email && contactDetails.parent_phone && contactDetails.parent_name) {
+    awaitingContactDetails = false;
+    submitContactDetails();
+  } else {
+    // Ask for missing details
+    const chatHistory = document.getElementById('chat-history');
+    const botMsg = document.createElement('div');
+    botMsg.className = 'message bot';
+    
+    let missingFields = [];
+    if (!contactDetails.parent_name) missingFields.push('your full name');
+    if (!contactDetails.parent_email) missingFields.push('your email address');
+    if (!contactDetails.parent_phone) missingFields.push('your phone number');
+    
+    botMsg.innerHTML = `
+      <div class="bubble">
+        <strong>Emily:</strong> Thank you! I still need ${missingFields.join(' and ')} to send your request.
+      </div>
+    `;
+    chatHistory.appendChild(botMsg);
+  }
+}
+
+// Submit email details for tour booking
+window.submitContactDetails = async function() {
+  // Gather form data
+  contactDetails.parent_name = document.getElementById('cf-name').value;
+  contactDetails.parent_email = document.getElementById('cf-email').value;
+  contactDetails.parent_phone = document.getElementById('cf-phone').value;
+  contactDetails.child_name = document.getElementById('cf-child').value;
+  contactDetails.year_group = document.getElementById('cf-year').value;
+  
+  if (!contactDetails.parent_name || !contactDetails.parent_email || !contactDetails.parent_phone) {
+    alert('Please fill in all required fields (name, email, phone)');
+    return;
+  }
+  
+  // Store details for future use
+  localStorage.setItem('emily_parent_details', JSON.stringify({
+    name: contactDetails.parent_name,
+    email: contactDetails.parent_email,
+    phone: contactDetails.parent_phone,
+    child: contactDetails.child_name,
+    year: contactDetails.year_group
+  }));
+  
+  // Send via backend
+  try {
+    const response = await fetch('/submit-contact', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        parent_name: contactDetails.parent_name,
+        parent_email: contactDetails.parent_email,
+        parent_phone: contactDetails.parent_phone,
+        original_request: pendingRequest,
+        family_id: FAMILY_ID,
+        session_id: sessionId
+      })
+    });
+    
+    const result = await response.json();
+    
+    // Show confirmation
+    const chatHistory = document.getElementById('chat-history');
+    const confirmMsg = document.createElement('div');
+    confirmMsg.className = 'message bot';
+    
+    if (result.success) {
+      confirmMsg.innerHTML = `
+        <div class="bubble">
+          <strong>Emily:</strong> ✅ Perfect! I've sent your tour request to our admissions team. 
+          They'll contact you at ${contactDetails.parent_email} within 24 hours. 
+          Is there anything else I can help you with today?
+          <div class="email-confirmation">
+            Tour request sent for ${contactDetails.child_name || 'your daughter'} 
+            ${contactDetails.year_group ? `(${contactDetails.year_group})` : ''}
+          </div>
+        </div>
+      `;
+    } else {
+      confirmMsg.innerHTML = `
+        <div class="bubble">
+          <strong>Emily:</strong> ${result.message}
+        </div>
+      `;
+    }
+    
+    chatHistory.appendChild(confirmMsg);
+    chatHistory.scrollTop = chatHistory.scrollHeight;
+    
+    // Reset state
+    awaitingContactDetails = false;
+    pendingRequest = '';
+    
+  } catch (error) {
+    console.error('Error sending contact details:', error);
+    alert('Sorry, there was an error sending your request. Please try again or contact us directly.');
+  }
+};
+
+function updateQuickReplies(queries) {
+  const grid = document.getElementById('button-grid');
+  if (!grid || !queries || queries.length === 0) return;
+  
+  grid.innerHTML = '';
+  queries.forEach(query => {
+    const button = document.createElement('button');
+    button.className = 'quick-reply';
+    button.textContent = query;
+    button.onclick = () => sendMessage(query);
+    grid.appendChild(button);
+  });
+}
+
+function escapeHtml(text) {
+  const map = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;'
+  };
+  return text.replace(/[&<>"']/g, m => map[m]);
+}
+
+// ==================== Event Listeners ====================
+document.addEventListener('DOMContentLoaded', function() {
+  // Toggle chat
+  const toggle = document.getElementById('emily-toggle');
+  const chatbox = document.getElementById('emily-chatbox');
+  const closeBtn = document.getElementById('emily-close');
+  const input = document.getElementById('question-input');
+  const askBtn = document.getElementById('ask-button');
+  
+  toggle.addEventListener('click', () => {
+    chatbox.classList.add('open');
+    document.getElementById('emily-greeting').style.display = 'none';
+    input.focus();
+    
+    // Send welcome message if first open
+    const chatHistory = document.getElementById('chat-history');
+    if (chatHistory.children.length === 0) {
+      const welcomeMsg = document.createElement('div');
+      welcomeMsg.className = 'message bot';
+      
+      if (contactDetails.parent_name) {
+        welcomeMsg.innerHTML = `
+          <div class="bubble">
+            <strong>Emily:</strong> Hello ${contactDetails.parent_name}! Welcome back to More House School. 
+            How can I help you today?
+          </div>
+        `;
+      } else {
+        welcomeMsg.innerHTML = `
+          <div class="bubble">
+            <strong>Emily:</strong> Hello! I'm Emily, your AI assistant for More House School. 
+            How can I help you today? You can ask me about admissions, tours, fees, curriculum, or anything else about our school.
+          </div>
+        `;
+      }
+      chatHistory.appendChild(welcomeMsg);
     }
   });
   
-  
-  closeBtn.addEventListener("click", () => {
-    chatbox.classList.remove("open");
-    // Chat closed - resize iframe back to small bubble
-    sendResizeMessage(64, 64);
+  closeBtn.addEventListener('click', () => {
+    chatbox.classList.remove('open');
+    
+    // Save conversation summary if we have a session
+    if (sessionId) {
+      fetch('/api/conversation/end', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          session_id: sessionId,
+          family_id: FAMILY_ID
+        })
+      }).catch(e => console.error('Failed to save conversation:', e));
+    }
   });
-
-  // Send initial resize message on load
-setTimeout(() => {
-  sendResizeMessage(64, 64); // Start with small bubble size
-}, 1000); // Increased delay to ensure iframe is loaded
-
-  // Language + send
-  languageSelector.addEventListener("change", () => { currentLanguage = languageSelector.value; updateWelcome(); showInitialButtons(); });
-  sendBtn.addEventListener("click", () => sendMessage());
-  input.addEventListener("keypress", e => { if (e.key === "Enter") sendMessage(); });
-
-  // Init UI
-  updateWelcome();
-  showInitialButtons();
-
   
+  // Send message on enter
+  input.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter' && !isProcessing) {
+      const question = input.value.trim();
+      if (question) {
+        sendMessage(question);
+        input.value = '';
+      }
+    }
+  });
+  
+  // Send button
+  askBtn.addEventListener('click', () => {
+    const question = input.value.trim();
+    if (question && !isProcessing) {
+      sendMessage(question);
+      input.value = '';
+    }
+  });
+  
+  // Quick reply buttons
+  document.querySelectorAll('.quick-reply').forEach(button => {
+    button.addEventListener('click', (e) => {
+      const query = e.target.getAttribute('data-query') || e.target.textContent;
+      if (query) {
+        sendMessage(query);
+      }
+    });
+  });
+  
+  // Initialize session
+  initializeSession();
+});
 
-  // === 5) (Optional) Load the voice helper file automatically from chatbot service if not present ===
-  const hasVoice = !!document.querySelector('script[src*="realtime-voice-handsfree.js"]');
-  if (!hasVoice) {
-    const s = document.createElement("script");
-    s.src = CHATBOT_ORIGIN + "/static/realtime-voice-handsfree.js";
-    s.async = true;
-    document.body.appendChild(s);
+// ==================== Auto-save conversation ====================
+window.addEventListener('beforeunload', function() {
+  if (sessionId) {
+    // Use sendBeacon for reliable last-minute requests
+    navigator.sendBeacon('/api/conversation/end', JSON.stringify({
+      session_id: sessionId,
+      family_id: FAMILY_ID
+    }));
   }
 });
+
+console.log('✅ More House Emily ready - Contact collection and database logging enabled');
