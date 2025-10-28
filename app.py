@@ -132,6 +132,8 @@ class ConversationTracker:
         self.concerns = []
         self.child_name = None
         self.parent_name = None
+        self.parent_email = None  # For collecting contact info during conversation
+        self.parent_phone = None  # For collecting contact info during conversation
         self.year_group = None
         self.interests = []
         self.high_intent_signals = 0
@@ -941,35 +943,66 @@ def ask_with_tools():
     language = data.get('language', 'en')
     family_id = data.get('family_id')
     session_id = data.get('session_id') or str(uuid.uuid4())
-    
+
     if not question:
         return jsonify({"answer": "Please ask a question.", "queries": []})
-    
+
+    # Get or create conversation tracker
+    if session_id not in conversation_memory:
+        conversation_memory[session_id] = ConversationTracker(session_id, family_id)
+    tracker = conversation_memory[session_id]
+
     # Get family context
     family_ctx = fetch_family_context(family_id) if family_id else None
-    
+
     # Build system prompt
     system_prompt = f"""You are Emily, the AI assistant for More House School.
 Be warm, helpful, and professional. Use British spelling.
 Language: {language}
 
-When parents want to book a tour or contact admissions, you can help them send an email.
+IMPORTANT - Email Sending Process:
+When parents want to book a tour or contact admissions:
+1. First, warmly acknowledge their request
+2. Then ask for their details if you don't have them:
+   - Their full name
+   - Their email address
+   - Their phone number
+3. ONLY call the send_enquiry_email function when you have ALL three details
+4. Don't send the email until the parent has confirmed their information
+
+Be conversational and friendly when collecting information. For example:
+"I'd be delighted to arrange that for you! May I have your name, email address, and phone number so I can send this enquiry to our admissions team?"
 """
-    
+
     if family_ctx:
         child_name = family_ctx.get('child_name', 'your daughter')
         parent_name = family_ctx.get('parent_name', 'Parent')
+        parent_email = family_ctx.get('parent_email', None)
+        parent_phone = family_ctx.get('parent_phone', None)
         year_group = family_ctx.get('year_group', '')
-        
+
         system_prompt += f"""
-        
+
 FAMILY CONTEXT:
 Parent: {parent_name}
 Child: {child_name}
-Year group: {year_group}
+Year group: {year_group}"""
 
-Personalize your responses using this information.
-"""
+        if parent_email:
+            system_prompt += f"\nEmail: {parent_email}"
+        if parent_phone:
+            system_prompt += f"\nPhone: {parent_phone}"
+
+        system_prompt += "\n\nPersonalize your responses using this information."
+
+        # Pre-populate tracker with family context
+        if not tracker.parent_name:
+            tracker.parent_name = parent_name
+        if parent_email and not tracker.parent_email:
+            tracker.parent_email = parent_email
+        if parent_phone and not tracker.parent_phone:
+            tracker.parent_phone = parent_phone
+
     
     # Define email sending tool
     tools = [{
@@ -1003,19 +1036,27 @@ Personalize your responses using this information.
     }]
     
     try:
+        # Build conversation messages with history
+        messages = [{"role": "system", "content": system_prompt}]
+
+        # Add conversation history (last 5 interactions to keep context manageable)
+        for interaction in tracker.interactions[-5:]:
+            messages.append({"role": "user", "content": interaction['question']})
+            messages.append({"role": "assistant", "content": interaction['answer']})
+
+        # Add current question
+        messages.append({"role": "user", "content": question})
+
         # Call OpenAI with tools
         response = client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": question}
-            ],
+            messages=messages,
             tools=tools,
             tool_choice="auto",
             temperature=0.7,
-            max_tokens=300
+            max_tokens=500
         )
-        
+
         message = response.choices[0].message
         
         # Handle tool call (email sending)
@@ -1062,26 +1103,29 @@ Personalize your responses using this information.
             )
             
             # Get Emily's follow-up response
+            follow_up_messages = messages + [
+                message,
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": f"Email {'sent successfully' if success else 'failed'}: {result_msg}"
+                }
+            ]
+
             follow_up_response = client.chat.completions.create(
                 model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": question},
-                    message,
-                    {
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "content": f"Email {'sent successfully' if success else 'failed'}: {result_msg}"
-                    }
-                ],
+                messages=follow_up_messages,
                 temperature=0.7,
                 max_tokens=300
             )
-            
+
             answer = follow_up_response.choices[0].message.content
         else:
             answer = message.content
-        
+
+        # Store interaction in tracker
+        tracker.add_interaction(question, answer)
+
         return jsonify({
             "answer": answer,
             "queries": ["fees", "admissions", "open days", "curriculum"],

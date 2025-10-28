@@ -2,6 +2,25 @@
 
 The Emily chatbot now uses SMTP to send emails to admissions. This is more reliable than OAuth and works automatically without requiring user authentication.
 
+## How Email Sending Works
+
+When a parent asks to book a tour or contact admissions:
+
+1. **Emily asks for their details** - She'll politely request:
+   - Full name
+   - Email address
+   - Phone number
+
+2. **Parent provides information** - This can happen in one message or across multiple messages:
+   - "My name is John Smith, email john@example.com, phone 07700900000"
+   - OR multiple messages in a conversation
+
+3. **Emily sends the email** - Once she has all the required information, she automatically sends an email to admissions with the parent's enquiry
+
+4. **Confirmation** - Emily confirms the email was sent successfully
+
+**Important:** The frontend must send the same `session_id` with each request to maintain conversation history.
+
 ## Quick Setup (Gmail)
 
 ### 1. Enable 2-Factor Authentication on Gmail
