@@ -21,8 +21,9 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from flask import make_response
 
-# Gmail API imports
+# Email imports
 import base64
+import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 try:
@@ -43,7 +44,7 @@ load_dotenv()
 # ── OpenAI client ────────────────────────────────────────────────────────
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# ── Gmail API Configuration ──────────────────────────────────────────────
+# ── Gmail API Configuration (Legacy - OAuth) ─────────────────────────────
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
 GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:5000/auth/callback")
@@ -61,6 +62,18 @@ else:
         print("⚠️ Gmail API libraries not available")
     elif not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
         print("⚠️ Gmail OAuth credentials not set (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET)")
+
+# ── SMTP Configuration (Primary email method) ────────────────────────────
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER")  # School's Gmail address
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")  # App password (not regular password)
+SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "Emily - More House School")
+
+if SMTP_USER and SMTP_PASSWORD:
+    print("✅ SMTP email configured")
+else:
+    print("⚠️ SMTP not configured (SMTP_USER, SMTP_PASSWORD required)")
 
 
 # ── Flask app ────────────────────────────────────────────────────────────
@@ -119,6 +132,8 @@ class ConversationTracker:
         self.concerns = []
         self.child_name = None
         self.parent_name = None
+        self.parent_email = None  # For collecting contact info during conversation
+        self.parent_phone = None  # For collecting contact info during conversation
         self.year_group = None
         self.interests = []
         self.high_intent_signals = 0
@@ -768,42 +783,96 @@ def get_gmail_service():
         print(f"❌ Gmail service error: {e}")
         return None
 
-def send_email_via_gmail(to_email: str, cc_email: str, subject: str, body_html: str):
+def send_email_via_smtp(to_email: str, cc_email: str, subject: str, body_html: str):
     """
-    Send email via Gmail API
-    
+    Send email via SMTP (no OAuth required)
+
     Args:
         to_email: Recipient (admissions)
         cc_email: CC recipient (parent)
         subject: Email subject
         body_html: HTML body content
-    
+
+    Returns:
+        (success: bool, message: str)
+    """
+    if not SMTP_USER or not SMTP_PASSWORD:
+        return False, "SMTP not configured (set SMTP_USER and SMTP_PASSWORD in .env)"
+
+    try:
+        # Create message
+        message = MIMEMultipart('alternative')
+        message['From'] = f"{SMTP_FROM_NAME} <{SMTP_USER}>"
+        message['To'] = to_email
+        message['Cc'] = cc_email
+        message['Subject'] = subject
+
+        # Attach HTML body
+        html_part = MIMEText(body_html, 'html')
+        message.attach(html_part)
+
+        # Connect to SMTP server and send
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.starttls()  # Upgrade to secure connection
+            server.login(SMTP_USER, SMTP_PASSWORD)
+
+            # Send to both TO and CC recipients
+            recipients = [to_email]
+            if cc_email:
+                recipients.append(cc_email)
+
+            server.sendmail(SMTP_USER, recipients, message.as_string())
+
+        print(f"✅ Email sent via SMTP to {to_email} (CC: {cc_email})")
+        return True, "Email sent successfully"
+
+    except smtplib.SMTPAuthenticationError:
+        print(f"❌ SMTP authentication failed - check SMTP_USER and SMTP_PASSWORD")
+        return False, "Email authentication failed"
+    except smtplib.SMTPException as e:
+        print(f"❌ SMTP error: {e}")
+        return False, f"SMTP error: {str(e)}"
+    except Exception as e:
+        print(f"❌ Email error: {e}")
+        return False, f"Error: {str(e)}"
+
+def send_email_via_gmail(to_email: str, cc_email: str, subject: str, body_html: str):
+    """
+    Legacy Gmail API method (requires OAuth - not used by default)
+    Use send_email_via_smtp() instead for automatic sending
+
+    Args:
+        to_email: Recipient (admissions)
+        cc_email: CC recipient (parent)
+        subject: Email subject
+        body_html: HTML body content
+
     Returns:
         (success: bool, message: str)
     """
     service = get_gmail_service()
     if not service:
         return False, "Not authenticated with Gmail"
-    
+
     try:
         message = MIMEMultipart('alternative')
         message['To'] = to_email
         message['Cc'] = cc_email
         message['Subject'] = subject
-        
+
         html_part = MIMEText(body_html, 'html')
         message.attach(html_part)
-        
+
         raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
-        
+
         result = service.users().messages().send(
             userId='me',
             body={'raw': raw}
         ).execute()
-        
+
         print(f"✅ Email sent: {result.get('id')}")
         return True, "Email sent successfully"
-        
+
     except HttpError as error:
         print(f"❌ Gmail API error: {error}")
         return False, f"Gmail API error: {str(error)}"
@@ -874,35 +943,66 @@ def ask_with_tools():
     language = data.get('language', 'en')
     family_id = data.get('family_id')
     session_id = data.get('session_id') or str(uuid.uuid4())
-    
+
     if not question:
         return jsonify({"answer": "Please ask a question.", "queries": []})
-    
+
+    # Get or create conversation tracker
+    if session_id not in conversation_memory:
+        conversation_memory[session_id] = ConversationTracker(session_id, family_id)
+    tracker = conversation_memory[session_id]
+
     # Get family context
     family_ctx = fetch_family_context(family_id) if family_id else None
-    
+
     # Build system prompt
     system_prompt = f"""You are Emily, the AI assistant for More House School.
 Be warm, helpful, and professional. Use British spelling.
 Language: {language}
 
-When parents want to book a tour or contact admissions, you can help them send an email.
+IMPORTANT - Email Sending Process:
+When parents want to book a tour or contact admissions:
+1. First, warmly acknowledge their request
+2. Then ask for their details if you don't have them:
+   - Their full name
+   - Their email address
+   - Their phone number
+3. ONLY call the send_enquiry_email function when you have ALL three details
+4. Don't send the email until the parent has confirmed their information
+
+Be conversational and friendly when collecting information. For example:
+"I'd be delighted to arrange that for you! May I have your name, email address, and phone number so I can send this enquiry to our admissions team?"
 """
-    
+
     if family_ctx:
         child_name = family_ctx.get('child_name', 'your daughter')
         parent_name = family_ctx.get('parent_name', 'Parent')
+        parent_email = family_ctx.get('parent_email', None)
+        parent_phone = family_ctx.get('parent_phone', None)
         year_group = family_ctx.get('year_group', '')
-        
+
         system_prompt += f"""
-        
+
 FAMILY CONTEXT:
 Parent: {parent_name}
 Child: {child_name}
-Year group: {year_group}
+Year group: {year_group}"""
 
-Personalize your responses using this information.
-"""
+        if parent_email:
+            system_prompt += f"\nEmail: {parent_email}"
+        if parent_phone:
+            system_prompt += f"\nPhone: {parent_phone}"
+
+        system_prompt += "\n\nPersonalize your responses using this information."
+
+        # Pre-populate tracker with family context
+        if not tracker.parent_name:
+            tracker.parent_name = parent_name
+        if parent_email and not tracker.parent_email:
+            tracker.parent_email = parent_email
+        if parent_phone and not tracker.parent_phone:
+            tracker.parent_phone = parent_phone
+
     
     # Define email sending tool
     tools = [{
@@ -936,19 +1036,27 @@ Personalize your responses using this information.
     }]
     
     try:
+        # Build conversation messages with history
+        messages = [{"role": "system", "content": system_prompt}]
+
+        # Add conversation history (last 5 interactions to keep context manageable)
+        for interaction in tracker.interactions[-5:]:
+            messages.append({"role": "user", "content": interaction['question']})
+            messages.append({"role": "assistant", "content": interaction['answer']})
+
+        # Add current question
+        messages.append({"role": "user", "content": question})
+
         # Call OpenAI with tools
         response = client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": question}
-            ],
+            messages=messages,
             tools=tools,
             tool_choice="auto",
             temperature=0.7,
-            max_tokens=300
+            max_tokens=500
         )
-        
+
         message = response.choices[0].message
         
         # Handle tool call (email sending)
@@ -956,8 +1064,8 @@ Personalize your responses using this information.
             tool_call = message.tool_calls[0]
             function_args = json.loads(tool_call.function.arguments)
             
-            # Send email via Gmail
-            success, result_msg = send_email_via_gmail(
+            # Send email via SMTP
+            success, result_msg = send_email_via_smtp(
                 to_email=ADMISSIONS_EMAIL,
                 cc_email=function_args['parent_email'],
                 subject=f"Tour Enquiry from {function_args['parent_name']}",
@@ -995,26 +1103,29 @@ Personalize your responses using this information.
             )
             
             # Get Emily's follow-up response
+            follow_up_messages = messages + [
+                message,
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": f"Email {'sent successfully' if success else 'failed'}: {result_msg}"
+                }
+            ]
+
             follow_up_response = client.chat.completions.create(
                 model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": question},
-                    message,
-                    {
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "content": f"Email {'sent successfully' if success else 'failed'}: {result_msg}"
-                    }
-                ],
+                messages=follow_up_messages,
                 temperature=0.7,
                 max_tokens=300
             )
-            
+
             answer = follow_up_response.choices[0].message.content
         else:
             answer = message.content
-        
+
+        # Store interaction in tracker
+        tracker.add_interaction(question, answer)
+
         return jsonify({
             "answer": answer,
             "queries": ["fees", "admissions", "open days", "curriculum"],
