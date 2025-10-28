@@ -27,7 +27,6 @@
   let sessionId = null;
   let familyId = null;
   let currentLang = headerLangSel?.value || 'en';
-  let pendingFunctionCall = null;  // Track function calls
 
   // === Fallback watchdog ===
   let fallbackTimer = null;
@@ -272,6 +271,7 @@
 
   function onEventMessage(evt){
     let msg; try{ msg = JSON.parse(evt.data); } catch { return; }
+    console.log("📥 Voice event:", msg.type);
     switch (msg.type) {
       case 'input_audio_buffer.speech_started':
         showIndicator('Listeningâ€¦'); break;
@@ -286,94 +286,109 @@
       case 'response.audio.done':
         showIndicator('Listeningâ€¦');
         cancelFallbackTimer(); // reply finished
+        break;
 
       // Handle function calls
-      case 'response.function_call_arguments.delta':
-        if (!pendingFunctionCall) {
-          pendingFunctionCall = {
-            call_id: msg.call_id,
-            name: msg.name,
-            arguments: ''
-          };
-        }
-        pendingFunctionCall.arguments += msg.delta || '';
+      case 'response.function_call_arguments.done':
+        // Emily called a tool - execute it
+        handleToolCall(msg);
         break;
 
-      case 'response.function_call_arguments.done':
-        if (pendingFunctionCall) {
-          handleFunctionCall(pendingFunctionCall);
-          pendingFunctionCall = null;
-        }
-        break;
       default: break;
     }
   }
 
 
-  async function handleFunctionCall(call) {
-    console.log('🔧 Function call:', call.name, call.arguments);
-    showIndicator('Sending email…');
+  async function handleToolCall(msg) {
+    const callId = msg.call_id;
+    const functionName = msg.name;
+    let args = {};
 
     try {
-      const args = JSON.parse(call.arguments);
-      let endpoint = '';
-      let payload = {};
+      args = JSON.parse(msg.arguments);
+    } catch (e) {
+      console.error('Failed to parse tool arguments:', e);
+    }
 
-      switch (call.name) {
-        case 'send_enquiry_email':
-          endpoint = '/realtime/tool/send_enquiry_email';
-          payload = {
+    console.log(`🔧 Tool called: ${functionName}`, args);
+
+    let result = null;
+    let error = null;
+
+    try {
+      if (functionName === 'send_enquiry_email') {
+        showIndicator('Sending email…');
+
+        const response = await fetch('/realtime/tool/send_enquiry_email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
             parent_name: args.parent_name,
             parent_email: args.parent_email,
             parent_phone: args.parent_phone,
             message: args.message
-          };
-          break;
+          })
+        });
 
-        case 'get_open_days':
-          endpoint = '/realtime/tool/get_open_days';
-          payload = {};
-          break;
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
 
-        case 'kb_search':
-          endpoint = '/realtime/tool/kb_search';
-          payload = { query: args.query };
-          break;
+        const data = await response.json();
+        result = data;
+        console.log('✅ Email sent');
 
-        default:
-          console.warn('Unknown function:', call.name);
-          return;
+      } else if (functionName === 'get_open_days') {
+        const response = await fetch('/realtime/tool/get_open_days', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        result = await response.json();
+        console.log('✅ Open days fetched');
+
+      } else if (functionName === 'kb_search') {
+        const response = await fetch('/realtime/tool/kb_search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: args.query })
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        result = await response.json();
+        console.log('✅ KB search completed');
+
+      } else {
+        error = `Unknown tool: ${functionName}`;
       }
 
-      // Call backend endpoint
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      const result = await response.json();
-      console.log('✅ Function result:', result);
-
-      // Send result back to realtime session
-      sendEvent({
-        type: 'conversation.item.create',
-        item: {
-          type: 'function_call_output',
-          call_id: call.call_id,
-          output: JSON.stringify(result)
-        }
-      });
-
-      // Request response generation
-      sendEvent({ type: 'response.create' });
-
-    } catch (error) {
-      console.error('❌ Function call error:', error);
-      showIndicator('Error sending email');
+    } catch (e) {
+      console.error(`Tool execution error:`, e);
+      error = e.message;
     }
-  }
 
+    // Send the result back to Emily
+    sendEvent({
+      type: 'conversation.item.create',
+      item: {
+        type: 'function_call_output',
+        call_id: callId,
+        output: error ? JSON.stringify({ error }) : JSON.stringify(result)
+      }
+    });
+
+    // Tell Emily to generate a response with the tool result
+    sendEvent({
+      type: 'response.create'
+    });
+  }
   function teardownSession() {
     try { micStream?.getTracks().forEach(t => t.stop()); } catch {}
     try { pc?.close(); } catch {}
