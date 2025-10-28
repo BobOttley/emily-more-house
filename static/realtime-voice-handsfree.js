@@ -272,6 +272,7 @@
 
   function onEventMessage(evt){
     let msg; try{ msg = JSON.parse(evt.data); } catch { return; }
+    console.log("📥 Voice event:", msg.type);
     switch (msg.type) {
       case 'input_audio_buffer.speech_started':
         showIndicator('Listeningâ€¦'); break;
@@ -286,6 +287,7 @@
       case 'response.audio.done':
         showIndicator('Listeningâ€¦');
         cancelFallbackTimer(); // reply finished
+        break;
 
       // Handle function calls
       case 'response.function_call_arguments.delta':
