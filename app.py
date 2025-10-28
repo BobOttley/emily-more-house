@@ -896,6 +896,72 @@ def realtime_tool_get_open_days():
         "events": events
     })
 
+@app.route("/realtime/tool/send_enquiry_email", methods=["POST"])
+def realtime_tool_send_enquiry_email():
+    """Tool endpoint for realtime model to send enquiry emails"""
+    data = request.json or {}
+
+    parent_name = data.get('parent_name')
+    parent_email = data.get('parent_email')
+    parent_phone = data.get('parent_phone')
+    message = data.get('message', 'Tour enquiry from voice conversation')
+
+    # Validate required fields
+    if not all([parent_name, parent_email, parent_phone]):
+        return jsonify({
+            "ok": False,
+            "error": "Missing required fields: parent_name, parent_email, or parent_phone"
+        }), 400
+
+    # Send email via SMTP
+    success, result_msg = send_email_via_smtp(
+        to_email=ADMISSIONS_EMAIL,
+        cc_email=parent_email,
+        subject=f"Tour Enquiry from {parent_name}",
+        body_html=f"""
+        <html>
+          <body style="font-family: Arial, sans-serif;">
+            <h2 style="color: #091825;">New Tour Enquiry - More House School</h2>
+
+            <table style="border-collapse: collapse; width: 100%; max-width: 600px;">
+              <tr>
+                <td style="padding: 8px; font-weight: bold; border-bottom: 1px solid #ddd;">Parent Name:</td>
+                <td style="padding: 8px; border-bottom: 1px solid #ddd;">{parent_name}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px; font-weight: bold; border-bottom: 1px solid #ddd;">Email:</td>
+                <td style="padding: 8px; border-bottom: 1px solid #ddd;">{parent_email}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px; font-weight: bold; border-bottom: 1px solid #ddd;">Phone:</td>
+                <td style="padding: 8px; border-bottom: 1px solid #ddd;">{parent_phone}</td>
+              </tr>
+            </table>
+
+            <h3 style="color: #091825; margin-top: 20px;">Message:</h3>
+            <p style="background: #f9f9f9; padding: 15px; border-left: 4px solid #FF9F1C;">
+              {message}
+            </p>
+
+            <p style="color: #666; font-size: 12px; margin-top: 30px;">
+              <em>This enquiry was sent via Emily, the More House AI assistant (voice conversation).</em>
+            </p>
+          </body>
+        </html>
+        """
+    )
+
+    if success:
+        return jsonify({
+            "ok": True,
+            "message": f"Email sent successfully to {ADMISSIONS_EMAIL}"
+        })
+    else:
+        return jsonify({
+            "ok": False,
+            "error": result_msg
+        }), 500
+
 @app.route('/ask', methods=['POST'])
 def ask():
     data = request.json or {}
@@ -1183,6 +1249,11 @@ def create_realtime_session():
         f"PRIMARY LANGUAGE: {language}. Always speak and respond in this language (unless the user explicitly switches). "
         "Understand and recognise user speech in this language from the first turn. "
         "When asked about open days, visits, or tours, ALWAYS call the tool `get_open_days` and use only its response. Never guess dates. "
+        "IMPORTANT - Email Sending: When parents want to book a tour or contact admissions: "
+        "1. First, warmly acknowledge their request "
+        "2. Then ask for their contact details conversationally: 'Lovely! Can I take your name, email address, and phone number so I can send this through to our admissions team?' "
+        "3. ONLY call send_enquiry_email when you have ALL three: name, email, and phone "
+        "4. After sending, confirm: 'Perfect! I've sent that through to admissions. They'll be in touch with you shortly.' "
         "You are Emily, a warm and knowledgeable admissions advisor for More House School, "
         "an independent all-girls school in Knightsbridge, London. "
         "Speak with a friendly British accent, using natural conversational tone. "
@@ -1295,6 +1366,33 @@ def create_realtime_session():
                             "type": "object",
                             "properties": {},
                             "required": []
+                        }
+                    },
+                    {
+                        "type": "function",
+                        "name": "send_enquiry_email",
+                        "description": "Send a tour booking or enquiry email to More House admissions. ONLY use this when you have collected ALL required information: parent name, email, and phone number. Ask for these details first if you don't have them.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "parent_name": {
+                                    "type": "string",
+                                    "description": "Parent's full name"
+                                },
+                                "parent_email": {
+                                    "type": "string",
+                                    "description": "Parent's email address"
+                                },
+                                "parent_phone": {
+                                    "type": "string",
+                                    "description": "Parent's phone number"
+                                },
+                                "message": {
+                                    "type": "string",
+                                    "description": "The enquiry message or tour request details"
+                                }
+                            },
+                            "required": ["parent_name", "parent_email", "parent_phone", "message"]
                         }
                     }
                 ]
