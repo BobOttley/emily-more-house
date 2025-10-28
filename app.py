@@ -1153,7 +1153,17 @@ def end_conversation():
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return """
+    <html>
+        <head><title>Emily - More House School AI Assistant</title></head>
+        <body>
+            <h1>Emily AI Assistant</h1>
+            <p>Emily is embedded in the school's prospectus pages.</p>
+            <p>Gmail Status: <a href="/auth/status">Check Status</a></p>
+            <p>Authenticate Gmail: <a href="/auth/google/login">Login with Google</a></p>
+        </body>
+    </html>
+    """
 
 @app.route('/static/<path:filename>')
 def serve_static(filename):
