@@ -27,6 +27,7 @@
   let sessionId = null;
   let familyId = null;
   let currentLang = headerLangSel?.value || 'en';
+  let pendingFunctionCall = null;  // Track function calls
 
   // === Fallback watchdog ===
   let fallbackTimer = null;
@@ -285,8 +286,91 @@
       case 'response.audio.done':
         showIndicator('Listeningâ€¦');
         cancelFallbackTimer(); // reply finished
+
+      // Handle function calls
+      case 'response.function_call_arguments.delta':
+        if (!pendingFunctionCall) {
+          pendingFunctionCall = {
+            call_id: msg.call_id,
+            name: msg.name,
+            arguments: ''
+          };
+        }
+        pendingFunctionCall.arguments += msg.delta || '';
+        break;
+
+      case 'response.function_call_arguments.done':
+        if (pendingFunctionCall) {
+          handleFunctionCall(pendingFunctionCall);
+          pendingFunctionCall = null;
+        }
         break;
       default: break;
+    }
+  }
+
+
+  async function handleFunctionCall(call) {
+    console.log('🔧 Function call:', call.name, call.arguments);
+    showIndicator('Sending email…');
+
+    try {
+      const args = JSON.parse(call.arguments);
+      let endpoint = '';
+      let payload = {};
+
+      switch (call.name) {
+        case 'send_enquiry_email':
+          endpoint = '/realtime/tool/send_enquiry_email';
+          payload = {
+            parent_name: args.parent_name,
+            parent_email: args.parent_email,
+            parent_phone: args.parent_phone,
+            message: args.message
+          };
+          break;
+
+        case 'get_open_days':
+          endpoint = '/realtime/tool/get_open_days';
+          payload = {};
+          break;
+
+        case 'kb_search':
+          endpoint = '/realtime/tool/kb_search';
+          payload = { query: args.query };
+          break;
+
+        default:
+          console.warn('Unknown function:', call.name);
+          return;
+      }
+
+      // Call backend endpoint
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const result = await response.json();
+      console.log('✅ Function result:', result);
+
+      // Send result back to realtime session
+      sendEvent({
+        type: 'conversation.item.create',
+        item: {
+          type: 'function_call_output',
+          call_id: call.call_id,
+          output: JSON.stringify(result)
+        }
+      });
+
+      // Request response generation
+      sendEvent({ type: 'response.create' });
+
+    } catch (error) {
+      console.error('❌ Function call error:', error);
+      showIndicator('Error sending email');
     }
   }
 
