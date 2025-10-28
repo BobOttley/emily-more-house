@@ -1165,6 +1165,28 @@ def index():
     </html>
     """
 
+@app.route('/embed')
+def embed():
+    """Serve the chatbot embed page"""
+    family_id = request.args.get('family_id', '')
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Emily Chat</title>
+    </head>
+    <body style="margin: 0; padding: 0;">
+        <script>
+            window.FAMILY_ID = '{family_id}';
+        </script>
+        <script src="/static/script.js"></script>
+        <script src="/static/realtime-voice-handsfree.js"></script>
+    </body>
+    </html>
+    """
+
 @app.route('/static/<path:filename>')
 def serve_static(filename):
     return send_from_directory('static', filename)
