@@ -21,8 +21,9 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from flask import make_response
 
-# Gmail API imports
+# Email imports
 import base64
+import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 try:
@@ -43,7 +44,7 @@ load_dotenv()
 # ── OpenAI client ────────────────────────────────────────────────────────
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# ── Gmail API Configuration ──────────────────────────────────────────────
+# ── Gmail API Configuration (Legacy - OAuth) ─────────────────────────────
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
 GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:5000/auth/callback")
@@ -61,6 +62,18 @@ else:
         print("⚠️ Gmail API libraries not available")
     elif not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
         print("⚠️ Gmail OAuth credentials not set (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET)")
+
+# ── SMTP Configuration (Primary email method) ────────────────────────────
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER")  # School's Gmail address
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")  # App password (not regular password)
+SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "Emily - More House School")
+
+if SMTP_USER and SMTP_PASSWORD:
+    print("✅ SMTP email configured")
+else:
+    print("⚠️ SMTP not configured (SMTP_USER, SMTP_PASSWORD required)")
 
 
 # ── Flask app ────────────────────────────────────────────────────────────
@@ -768,42 +781,96 @@ def get_gmail_service():
         print(f"❌ Gmail service error: {e}")
         return None
 
-def send_email_via_gmail(to_email: str, cc_email: str, subject: str, body_html: str):
+def send_email_via_smtp(to_email: str, cc_email: str, subject: str, body_html: str):
     """
-    Send email via Gmail API
-    
+    Send email via SMTP (no OAuth required)
+
     Args:
         to_email: Recipient (admissions)
         cc_email: CC recipient (parent)
         subject: Email subject
         body_html: HTML body content
-    
+
+    Returns:
+        (success: bool, message: str)
+    """
+    if not SMTP_USER or not SMTP_PASSWORD:
+        return False, "SMTP not configured (set SMTP_USER and SMTP_PASSWORD in .env)"
+
+    try:
+        # Create message
+        message = MIMEMultipart('alternative')
+        message['From'] = f"{SMTP_FROM_NAME} <{SMTP_USER}>"
+        message['To'] = to_email
+        message['Cc'] = cc_email
+        message['Subject'] = subject
+
+        # Attach HTML body
+        html_part = MIMEText(body_html, 'html')
+        message.attach(html_part)
+
+        # Connect to SMTP server and send
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.starttls()  # Upgrade to secure connection
+            server.login(SMTP_USER, SMTP_PASSWORD)
+
+            # Send to both TO and CC recipients
+            recipients = [to_email]
+            if cc_email:
+                recipients.append(cc_email)
+
+            server.sendmail(SMTP_USER, recipients, message.as_string())
+
+        print(f"✅ Email sent via SMTP to {to_email} (CC: {cc_email})")
+        return True, "Email sent successfully"
+
+    except smtplib.SMTPAuthenticationError:
+        print(f"❌ SMTP authentication failed - check SMTP_USER and SMTP_PASSWORD")
+        return False, "Email authentication failed"
+    except smtplib.SMTPException as e:
+        print(f"❌ SMTP error: {e}")
+        return False, f"SMTP error: {str(e)}"
+    except Exception as e:
+        print(f"❌ Email error: {e}")
+        return False, f"Error: {str(e)}"
+
+def send_email_via_gmail(to_email: str, cc_email: str, subject: str, body_html: str):
+    """
+    Legacy Gmail API method (requires OAuth - not used by default)
+    Use send_email_via_smtp() instead for automatic sending
+
+    Args:
+        to_email: Recipient (admissions)
+        cc_email: CC recipient (parent)
+        subject: Email subject
+        body_html: HTML body content
+
     Returns:
         (success: bool, message: str)
     """
     service = get_gmail_service()
     if not service:
         return False, "Not authenticated with Gmail"
-    
+
     try:
         message = MIMEMultipart('alternative')
         message['To'] = to_email
         message['Cc'] = cc_email
         message['Subject'] = subject
-        
+
         html_part = MIMEText(body_html, 'html')
         message.attach(html_part)
-        
+
         raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
-        
+
         result = service.users().messages().send(
             userId='me',
             body={'raw': raw}
         ).execute()
-        
+
         print(f"✅ Email sent: {result.get('id')}")
         return True, "Email sent successfully"
-        
+
     except HttpError as error:
         print(f"❌ Gmail API error: {error}")
         return False, f"Gmail API error: {str(error)}"
@@ -956,8 +1023,8 @@ Personalize your responses using this information.
             tool_call = message.tool_calls[0]
             function_args = json.loads(tool_call.function.arguments)
             
-            # Send email via Gmail
-            success, result_msg = send_email_via_gmail(
+            # Send email via SMTP
+            success, result_msg = send_email_via_smtp(
                 to_email=ADMISSIONS_EMAIL,
                 cc_email=function_args['parent_email'],
                 subject=f"Tour Enquiry from {function_args['parent_name']}",
