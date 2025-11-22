@@ -1,0 +1,14 @@
+# Byte-compiled / cache files
+__pycache__/
+*.py[cod]
+
+# macOS system files
+.DS_Store
+
+# Environment
+.env
+venv/
+
+# Embedding / model files
+
+
